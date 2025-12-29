@@ -8,7 +8,6 @@
 
 static const char *program_usage =
     "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [ARGS]...\n"
-    "List processes with network activity.\n\n"
     "Commands:\n"
     "  list                List processes with network connections\n"
     "  help                Display this help message\n\n"
