@@ -18,7 +18,23 @@ typedef struct {
     size_t capacity;
 } process_list_t;
 
-process_list_t* get_network_processes(void);
+/**
+ * Retrieve a list of processes with active network connections.
+ *
+ * Queries the kernel via netlink socket diagnostics to find all processes with
+ * TCP or UDP connections (both IPv4 and IPv6). This includes both established
+ * TCP connections and UDP sockets (listening or connected).
+ *
+ * @return A newly allocated process_list_t that must be freed with
+ *         destroy_process_list(), or NULL on failure.
+ */
+process_list_t *get_network_processes(void);
+
+/**
+ * Free a process list and all its resources.
+ *
+ * @param list The process list to free, or NULL (no-op).
+ */
 void destroy_process_list(process_list_t *list);
 
 #endif
