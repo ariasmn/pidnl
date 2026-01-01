@@ -24,9 +24,7 @@ typedef struct {
  *
  * Queries the kernel via netlink socket diagnostics to find all processes with
  * TCP or UDP connections (both IPv4 and IPv6). This includes both established
- * TCP connections and UDP sockets (listening or connected).
- *
- * @return A newly allocated process_list_t that must be freed with
+ * TCP concated process_list_t that must be freed with
  *         destroy_process_list(), or NULL on failure.
  */
 process_list_t *get_network_processes(void);
