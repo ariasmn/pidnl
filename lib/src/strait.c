@@ -1,6 +1,11 @@
+#include "strait.h"
+
 #include <arpa/inet.h>
+#include <bpf/libbpf.h>
+#include <bpf/bpf.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -9,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define SOCKET_BUFFER_SIZE (getpagesize() < 8192L ? getpagesize() : 8192L)
@@ -19,23 +25,6 @@ typedef struct {
     struct nlmsghdr nlh;
     struct inet_diag_req_v2 req;
 } diag_request_t;
-
-// Process information
-typedef struct {
-    pid_t pid;
-    char process_name[256];
-    char exe_path[512];
-    int num_connections;
-    int has_tcp;
-    int has_udp;
-} process_info_t;
-
-// Process list
-typedef struct {
-    process_info_t *processes;
-    size_t count;
-    size_t capacity;
-} process_list_t;
 
 // Initializes an empty process list
 static process_list_t *create_process_list(void) {
@@ -303,4 +292,237 @@ void destroy_process_list(process_list_t *list) {
         return;
     free(list->processes);
     free(list);
+}
+
+// ============ Rate Limiting using eBPF and cgroups ============
+
+#define CGROUP_PATH "/sys/fs/cgroup/strait_rate_limit"
+
+#ifdef INSTALLED
+#define BPF_OBJECT_PATH "/usr/share/strait/ratelimit.bpf.o"
+#else
+#define BPF_OBJECT_PATH "lib/src/ratelimit.bpf.o"
+#endif
+
+struct rate_limiter {
+    pid_t pid;
+    char cgroup_path[512];
+    struct bpf_object *bpf_obj;
+    int cgroup_fd;
+};
+
+// Create cgroup and move PID into it
+static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
+    int fd;
+    char pid_str[32];
+    int ret;
+
+    snprintf(cgroup_path, path_size, "%s_pid_%d", CGROUP_PATH, pid);
+
+    // Create cgroup directory
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s 2>/dev/null || true", cgroup_path);
+    ret = system(cmd);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to create cgroup directory\n");
+        return -1;
+    }
+
+    // Open cgroup.procs and write PID
+    char procs_path[512];
+    snprintf(procs_path, sizeof(procs_path), "%s/cgroup.procs", cgroup_path);
+
+    fd = open(procs_path, O_WRONLY);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s: %s\n", procs_path, strerror(errno));
+        return -1;
+    }
+
+    snprintf(pid_str, sizeof(pid_str), "%d", pid);
+    ret = write(fd, pid_str, strlen(pid_str));
+    close(fd);
+
+    if (ret < 0) {
+        fprintf(stderr, "Failed to write PID to cgroup: %s\n", strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+// Load and attach eBPF programs to cgroup
+static int attach_bpf_programs(const char *cgroup_path, struct bpf_object **obj_out,
+                                int *cgroup_fd_out) {
+    struct bpf_object *obj;
+    struct bpf_program *egress_prog, *ingress_prog;
+    int egress_fd, ingress_fd;
+    int cgroup_fd;
+    int err;
+
+    // Open and load BPF object
+    obj = bpf_object__open_file(BPF_OBJECT_PATH, NULL);
+    if (libbpf_get_error(obj)) {
+        fprintf(stderr, "Failed to open BPF object: %s\n", strerror(errno));
+        return -1;
+    }
+
+    err = bpf_object__load(obj);
+    if (err) {
+        fprintf(stderr, "Failed to load BPF object: %d\n", err);
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    // Find programs
+    egress_prog = bpf_object__find_program_by_name(obj, "egress_rate_limit");
+    ingress_prog = bpf_object__find_program_by_name(obj, "ingress_rate_limit");
+
+    if (!egress_prog || !ingress_prog) {
+        fprintf(stderr, "Failed to find eBPF programs\n");
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    egress_fd = bpf_program__fd(egress_prog);
+    ingress_fd = bpf_program__fd(ingress_prog);
+
+    // Open cgroup
+    cgroup_fd = open(cgroup_path, O_RDONLY);
+    if (cgroup_fd < 0) {
+        fprintf(stderr, "Failed to open cgroup %s: %s\n", cgroup_path,
+                strerror(errno));
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    // Attach egress program
+    err = bpf_prog_attach(egress_fd, cgroup_fd, BPF_CGROUP_INET_EGRESS, 0);
+    if (err) {
+        fprintf(stderr, "Failed to attach egress program: %s\n",
+                strerror(errno));
+        close(cgroup_fd);
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    // Attach ingress program
+    err = bpf_prog_attach(ingress_fd, cgroup_fd, BPF_CGROUP_INET_INGRESS, 0);
+    if (err) {
+        fprintf(stderr, "Failed to attach ingress program: %s\n",
+                strerror(errno));
+        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
+        close(cgroup_fd);
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    *obj_out = obj;
+    *cgroup_fd_out = cgroup_fd;
+
+    return 0;
+}
+
+// Move PID back to root cgroup
+static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
+    int fd;
+    char pid_str[32];
+
+    // Open root cgroup.procs
+    fd = open("/sys/fs/cgroup/cgroup.procs", O_WRONLY);
+    if (fd < 0) {
+        // Try legacy path
+        fd = open("/sys/fs/cgroup/tasks", O_WRONLY);
+        if (fd < 0) {
+            fprintf(stderr, "Failed to open root cgroup: %s\n",
+                    strerror(errno));
+            return -1;
+        }
+    }
+
+    snprintf(pid_str, sizeof(pid_str), "%d", pid);
+    write(fd, pid_str, strlen(pid_str));
+    close(fd);
+
+    // Remove the cgroup directory
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "rmdir %s 2>/dev/null || true", cgroup_path);
+    system(cmd);
+
+    return 0;
+}
+
+int limit_process_bandwidth(pid_t pid, rate_limit_config_t config,
+                            rate_limiter_t **handle) {
+    rate_limiter_t *limiter;
+    char cgroup_path[512];
+    int err;
+
+    (void)config; // Config will be used when eBPF supports runtime limits
+
+    if (pid <= 0) {
+        fprintf(stderr, "Invalid PID: %d\n", pid);
+        return -1;
+    }
+
+    if (!handle) {
+        fprintf(stderr, "Handle pointer cannot be NULL\n");
+        return -1;
+    }
+
+    limiter = malloc(sizeof(rate_limiter_t));
+    if (!limiter) {
+        fprintf(stderr, "Failed to allocate rate limiter\n");
+        return -1;
+    }
+
+    memset(limiter, 0, sizeof(rate_limiter_t));
+    limiter->pid = pid;
+
+    // Create cgroup and move PID into it
+    err = setup_cgroup(pid, cgroup_path, sizeof(cgroup_path));
+    if (err) {
+        fprintf(stderr, "Failed to setup cgroup\n");
+        free(limiter);
+        return -1;
+    }
+
+    snprintf(limiter->cgroup_path, sizeof(limiter->cgroup_path), "%s",
+             cgroup_path);
+
+    // Load and attach eBPF programs
+    err = attach_bpf_programs(cgroup_path, &limiter->bpf_obj,
+                              &limiter->cgroup_fd);
+    if (err) {
+        fprintf(stderr, "Failed to attach eBPF programs\n");
+        cleanup_cgroup(pid, cgroup_path);
+        free(limiter);
+        return -1;
+    }
+
+    *handle = limiter;
+    return 0;
+}
+
+void destroy_rate_limiter(rate_limiter_t *limiter) {
+    if (!limiter)
+        return;
+
+    // Detach eBPF programs
+    if (limiter->cgroup_fd >= 0) {
+        bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
+        bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_INGRESS);
+        close(limiter->cgroup_fd);
+    }
+
+    // Close BPF object
+    if (limiter->bpf_obj) {
+        bpf_object__close(limiter->bpf_obj);
+    }
+
+    // Move PID back to root cgroup and remove cgroup
+    if (limiter->cgroup_path[0] != '\0') {
+        cleanup_cgroup(limiter->pid, limiter->cgroup_path);
+    }
+
+    free(limiter);
 }
