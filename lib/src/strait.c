@@ -1,8 +1,8 @@
 #include "strait.h"
 
 #include <arpa/inet.h>
-#include <bpf/libbpf.h>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -298,6 +298,10 @@ void destroy_process_list(process_list_t *list) {
 
 #define CGROUP_PATH "/sys/fs/cgroup/strait_rate_limit"
 
+// Direction constants (must match eBPF program)
+#define DIRECTION_UPLOAD 0
+#define DIRECTION_DOWNLOAD 1
+
 #ifdef INSTALLED
 #define BPF_OBJECT_PATH "/usr/share/strait/ratelimit.bpf.o"
 #else
@@ -309,6 +313,7 @@ struct rate_limiter {
     char cgroup_path[512];
     struct bpf_object *bpf_obj;
     int cgroup_fd;
+    int rate_limits_map_fd;
 };
 
 // Create cgroup and move PID into it
@@ -351,13 +356,15 @@ static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
 }
 
 // Load and attach eBPF programs to cgroup
-static int attach_bpf_programs(const char *cgroup_path, struct bpf_object **obj_out,
-                                int *cgroup_fd_out) {
+// Fills the rate_limiter struct with bpf_obj, cgroup_fd, and rate_limits_map_fd
+static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t config) {
     struct bpf_object *obj;
     struct bpf_program *egress_prog, *ingress_prog;
+    struct bpf_map *rate_limits_map;
     int egress_fd, ingress_fd;
     int cgroup_fd;
     int err;
+    __u64 upload_bps, download_bps;
 
     // Open and load BPF object
     obj = bpf_object__open_file(BPF_OBJECT_PATH, NULL);
@@ -383,13 +390,41 @@ static int attach_bpf_programs(const char *cgroup_path, struct bpf_object **obj_
         return -1;
     }
 
+    // Find the rate_limits map
+    rate_limits_map = bpf_object__find_map_by_name(obj, "rate_limits");
+    if (!rate_limits_map) {
+        fprintf(stderr, "Failed to find rate_limits map\n");
+        bpf_object__close(obj);
+        return -1;
+    }
+
+    limiter->rate_limits_map_fd = bpf_map__fd(rate_limits_map);
+
+    // Initialize rate limits in the map (convert kbps to bps)
+    upload_bps = (__u64)config.upload_kbps * 1000 / 8;
+    download_bps = (__u64)config.download_kbps * 1000 / 8;
+
+    // Direction UPLOAD
+    err = bpf_map_update_elem(limiter->rate_limits_map_fd,
+                              &(unsigned int){DIRECTION_UPLOAD}, &upload_bps, 0);
+    if (err) {
+        fprintf(stderr, "Failed to set upload limit in map: %d\n", err);
+    }
+
+    // Direction DOWNLOAD
+    err = bpf_map_update_elem(limiter->rate_limits_map_fd,
+                              &(unsigned int){DIRECTION_DOWNLOAD}, &download_bps, 0);
+    if (err) {
+        fprintf(stderr, "Failed to set download limit in map: %d\n", err);
+    }
+
     egress_fd = bpf_program__fd(egress_prog);
     ingress_fd = bpf_program__fd(ingress_prog);
 
     // Open cgroup
-    cgroup_fd = open(cgroup_path, O_RDONLY);
+    cgroup_fd = open(limiter->cgroup_path, O_RDONLY);
     if (cgroup_fd < 0) {
-        fprintf(stderr, "Failed to open cgroup %s: %s\n", cgroup_path,
+        fprintf(stderr, "Failed to open cgroup %s: %s\n", limiter->cgroup_path,
                 strerror(errno));
         bpf_object__close(obj);
         return -1;
@@ -416,8 +451,8 @@ static int attach_bpf_programs(const char *cgroup_path, struct bpf_object **obj_
         return -1;
     }
 
-    *obj_out = obj;
-    *cgroup_fd_out = cgroup_fd;
+    limiter->bpf_obj = obj;
+    limiter->cgroup_fd = cgroup_fd;
 
     return 0;
 }
@@ -451,56 +486,39 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     return 0;
 }
 
-int limit_process_bandwidth(pid_t pid, rate_limit_config_t config,
-                            rate_limiter_t **handle) {
+rate_limiter_t *limit_process_bandwidth(pid_t pid, rate_limit_config_t config) {
     rate_limiter_t *limiter;
-    char cgroup_path[512];
-    int err;
-
-    (void)config; // Config will be used when eBPF supports runtime limits
 
     if (pid <= 0) {
         fprintf(stderr, "Invalid PID: %d\n", pid);
-        return -1;
-    }
-
-    if (!handle) {
-        fprintf(stderr, "Handle pointer cannot be NULL\n");
-        return -1;
+        return NULL;
     }
 
     limiter = malloc(sizeof(rate_limiter_t));
     if (!limiter) {
         fprintf(stderr, "Failed to allocate rate limiter\n");
-        return -1;
+        return NULL;
     }
 
     memset(limiter, 0, sizeof(rate_limiter_t));
     limiter->pid = pid;
 
     // Create cgroup and move PID into it
-    err = setup_cgroup(pid, cgroup_path, sizeof(cgroup_path));
-    if (err) {
+    if (setup_cgroup(pid, limiter->cgroup_path, sizeof(limiter->cgroup_path))) {
         fprintf(stderr, "Failed to setup cgroup\n");
         free(limiter);
-        return -1;
+        return NULL;
     }
-
-    snprintf(limiter->cgroup_path, sizeof(limiter->cgroup_path), "%s",
-             cgroup_path);
 
     // Load and attach eBPF programs
-    err = attach_bpf_programs(cgroup_path, &limiter->bpf_obj,
-                              &limiter->cgroup_fd);
-    if (err) {
+    if (attach_bpf_programs(limiter, config)) {
         fprintf(stderr, "Failed to attach eBPF programs\n");
-        cleanup_cgroup(pid, cgroup_path);
+        cleanup_cgroup(pid, limiter->cgroup_path);
         free(limiter);
-        return -1;
+        return NULL;
     }
 
-    *handle = limiter;
-    return 0;
+    return limiter;
 }
 
 void destroy_rate_limiter(rate_limiter_t *limiter) {

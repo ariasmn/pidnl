@@ -58,10 +58,9 @@ typedef struct rate_limiter rate_limiter_t;
  *
  * @param pid The process ID to limit
  * @param config Rate limit configuration
- * @param handle Pointer to receive the rate limiter handle
- * @return 0 on success, -1 on error
+ * @return The rate limiter handle, or NULL on error
  */
-int limit_process_bandwidth(pid_t pid, rate_limit_config_t config, rate_limiter_t **handle);
+rate_limiter_t *limit_process_bandwidth(pid_t pid, rate_limit_config_t config);
 
 /**
  * Destroy a rate limiter and clean up resources.

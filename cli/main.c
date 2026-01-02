@@ -74,8 +74,8 @@ static void cmd_limit(int argc, char *argv[]) {
         argc--;
     }
 
-    // First pass: check for --help before parsing other options
-    for (int i = 1; i < argc; i++) {
+    // Check for --help
+    for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             help_shown = 1;
             break;
@@ -133,7 +133,8 @@ static void cmd_limit(int argc, char *argv[]) {
     }
     printf("\n");
 
-    if (limit_process_bandwidth(pid, config, &g_limiter) < 0) {
+    g_limiter = limit_process_bandwidth(pid, config);
+    if (!g_limiter) {
         fprintf(stderr, "%s: failed to limit bandwidth\n", PROGRAM_NAME);
         exit(EXIT_FAILURE);
     }
