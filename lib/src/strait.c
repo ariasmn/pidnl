@@ -132,6 +132,7 @@ static int send_diag_request(int fd, int family, int protocol) {
 }
 
 // Helper function to find PID by socket inode
+// TODO: Revisit this. Slow and probably unsafe.
 static pid_t find_pid_by_inode(unsigned int inode) {
     char path[64];
     char link[64];
