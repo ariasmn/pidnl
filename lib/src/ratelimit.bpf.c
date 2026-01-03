@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
+#include <linux/bpf.h>
 
 // Direction constants (used by both rate_limits and rate_state maps)
-#define DIRECTION_UPLOAD 0    // Upload traffic (egress, leaving the system)
-#define DIRECTION_DOWNLOAD 1  // Download traffic (ingress, entering the system)
+#define DIRECTION_UPLOAD 0   // Upload traffic (egress, leaving the system)
+#define DIRECTION_DOWNLOAD 1 // Download traffic (ingress, entering the system)
 
 // Rate limit state per direction (for token bucket)
 struct rate_limit_state {
@@ -12,7 +12,8 @@ struct rate_limit_state {
     __u64 last_update_ns;
 };
 
-// Map to store rate limit state per direction (DIRECTION_UPLOAD=0, DIRECTION_DOWNLOAD=1)
+// Map to store rate limit state per direction (DIRECTION_UPLOAD=0,
+// DIRECTION_DOWNLOAD=1)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 2);
@@ -31,15 +32,15 @@ struct {
 
 // Token bucket rate limiting
 // Returns: 1 = allow, 0 = drop
-static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
+static __always_inline int
+apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
     struct rate_limit_state *state;
     __u64 now = bpf_ktime_get_ns();
     __u64 tokens_to_add;
     __u64 elapsed_ns;
 
     state = bpf_map_lookup_elem(&rate_state, &direction);
-    if (!state)
-    {
+    if (!state) {
         return 1;
     }
 
@@ -52,14 +53,12 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
 
     // Cap tokens at 2x the rate limit (burst allowance)
     __u64 max_tokens = limit_bps * 2;
-    if (state->tokens > max_tokens)
-    {
+    if (state->tokens > max_tokens) {
         state->tokens = max_tokens;
     }
 
     // Check if we have enough tokens
-    if (state->tokens >= packet_size)
-    {
+    if (state->tokens >= packet_size) {
         state->tokens -= packet_size;
         return 1;
     }
@@ -68,23 +67,19 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
 }
 
 // This means "attach to a cgroup, and run at the socket buffer level"
-SEC("cgroup/skb")
-int egress_rate_limit(struct __sk_buff *skb) {
+SEC("cgroup/skb") int egress_rate_limit(struct __sk_buff *skb) {
     __u32 key = DIRECTION_UPLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
-    if (!limit)
-    {
+    if (!limit) {
         return 1;
     }
     return apply_rate_limit(DIRECTION_UPLOAD, *limit, skb->len);
 }
 
-SEC("cgroup/skb")
-int ingress_rate_limit(struct __sk_buff *skb) {
+SEC("cgroup/skb") int ingress_rate_limit(struct __sk_buff *skb) {
     __u32 key = DIRECTION_DOWNLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
-    if (!limit)
-    {
+    if (!limit) {
         return 1;
     }
     return apply_rate_limit(DIRECTION_DOWNLOAD, *limit, skb->len);

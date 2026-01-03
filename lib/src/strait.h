@@ -40,8 +40,9 @@ void destroy_process_list(process_list_t *list);
  * Rate limit configuration for limit_process_bandwidth()
  */
 typedef struct {
-    uint32_t upload_kbps;  // Upload limit in kilobits per second (0 = unlimited)
-    uint32_t download_kbps; // Download limit in kilobits per second (0 = unlimited)
+    uint32_t upload_kbps; // Upload limit in kilobits per second (0 = unlimited)
+    uint32_t
+        download_kbps; // Download limit in kilobits per second (0 = unlimited)
 } rate_limit_config_t;
 
 /**

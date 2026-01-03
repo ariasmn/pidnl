@@ -28,16 +28,20 @@ typedef struct {
 static rate_limiter_t *g_limiter = NULL;
 
 static void print_process_list(process_list_t *list) {
-    printf("%-8s %-20s %-10s %-10s %s\n", "PID", "NAME", "TCP", "UDP",
-           "EXECUTABLE");
-    printf("%-8s %-20s %-10s %-10s %s\n", "---", "----", "---", "---",
-           "----------");
+    printf(
+        "%-8s %-20s %-10s %-10s %s\n", "PID", "NAME", "TCP", "UDP", "EXECUTABLE"
+    );
+    printf(
+        "%-8s %-20s %-10s %-10s %s\n", "---", "----", "---", "---", "----------"
+    );
 
     for (size_t i = 0; i < list->count; i++) {
         process_info_t *proc = &list->processes[i];
-        printf("%-8d %-20s %-10s %-10s %s\n", proc->pid, proc->process_name,
-               proc->has_tcp ? "Yes" : "No", proc->has_udp ? "Yes" : "No",
-               proc->exe_path[0] ? proc->exe_path : "(unknown)");
+        printf(
+            "%-8d %-20s %-10s %-10s %s\n", proc->pid, proc->process_name,
+            proc->has_tcp ? "Yes" : "No", proc->has_udp ? "Yes" : "No",
+            proc->exe_path[0] ? proc->exe_path : "(unknown)"
+        );
     }
 }
 
@@ -83,25 +87,32 @@ static void cmd_limit(int argc, char *argv[]) {
     }
 
     if (help_shown) {
-        printf("Usage: %s limit [OPTIONS] <pid> <upload_kbps> [<download_kbps>]\n\n"
-               "Limit bandwidth for a process using eBPF and cgroups.\n\n"
-               "Arguments:\n"
-               "  pid                 Process ID to limit\n"
-               "  upload_kbps         Upload rate limit in kbps (0 = unlimited)\n"
-               "  download_kbps       Download rate limit in kbps (0 = unlimited)\n\n"
-               "Options:\n"
-               "  -h, --help          Display this help message\n\n"
-               "Example:\n"
-               "  %s limit 12345 1000 2000\n"
-               "  (Limits process 12345 to 1000 kbps upload, 2000 kbps download)\n",
-               PROGRAM_NAME, PROGRAM_NAME);
+        printf(
+            "Usage: %s limit [OPTIONS] <pid> <upload_kbps> "
+            "[<download_kbps>]\n\n"
+            "Limit bandwidth for a process using eBPF and cgroups.\n\n"
+            "Arguments:\n"
+            "  pid                 Process ID to limit\n"
+            "  upload_kbps         Upload rate limit in kbps (0 = unlimited)\n"
+            "  download_kbps       Download rate limit in kbps (0 = "
+            "unlimited)\n\n"
+            "Options:\n"
+            "  -h, --help          Display this help message\n\n"
+            "Example:\n"
+            "  %s limit 12345 1000 2000\n"
+            "  (Limits process 12345 to 1000 kbps upload, 2000 kbps "
+            "download)\n",
+            PROGRAM_NAME, PROGRAM_NAME
+        );
         exit(EXIT_SUCCESS);
     }
 
     if (argc < 2 || argc > 3) {
         fprintf(stderr, "%s: missing or invalid arguments\n", PROGRAM_NAME);
-        fprintf(stderr, "Try '%s limit --help' for more information.\n",
-                PROGRAM_NAME);
+        fprintf(
+            stderr, "Try '%s limit --help' for more information.\n",
+            PROGRAM_NAME
+        );
         exit(EXIT_FAILURE);
     }
 
@@ -116,16 +127,20 @@ static void cmd_limit(int argc, char *argv[]) {
 
     // Check for root
     if (geteuid() != 0) {
-        fprintf(stderr, "%s: this command requires root privileges\n",
-                PROGRAM_NAME);
+        fprintf(
+            stderr, "%s: this command requires root privileges\n", PROGRAM_NAME
+        );
         fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s limit <pid> <upload_kbps> [<download_kbps>]\n",
-                PROGRAM_NAME);
+        fprintf(
+            stderr, "  sudo %s limit <pid> <upload_kbps> [<download_kbps>]\n",
+            PROGRAM_NAME
+        );
         exit(EXIT_FAILURE);
     }
 
-    rate_limit_config_t config = {.upload_kbps = upload_kbps,
-                                  .download_kbps = download_kbps};
+    rate_limit_config_t config = {
+        .upload_kbps = upload_kbps, .download_kbps = download_kbps
+    };
 
     printf("Limiting PID %d to %u kbps upload", pid, upload_kbps);
     if (download_kbps > 0) {
@@ -214,8 +229,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "%s: missing command\n", PROGRAM_NAME);
         fprintf(stderr, "\nAvailable commands:\n");
         print_command_list();
-        fprintf(stderr, "\nTry '%s --help' for more information.\n",
-                PROGRAM_NAME);
+        fprintf(
+            stderr, "\nTry '%s --help' for more information.\n", PROGRAM_NAME
+        );
         return EXIT_FAILURE;
     }
 
@@ -224,12 +240,14 @@ int main(int argc, char *argv[]) {
     if (cmd) {
         cmd->handler(argc - cmd_index, argv + cmd_index);
     } else {
-        fprintf(stderr, "%s: unknown command '%s'\n", PROGRAM_NAME,
-                argv[cmd_index]);
+        fprintf(
+            stderr, "%s: unknown command '%s'\n", PROGRAM_NAME, argv[cmd_index]
+        );
         fprintf(stderr, "\nAvailable commands:\n");
         print_command_list();
-        fprintf(stderr, "\nTry '%s --help' for more information.\n",
-                PROGRAM_NAME);
+        fprintf(
+            stderr, "\nTry '%s --help' for more information.\n", PROGRAM_NAME
+        );
         return EXIT_FAILURE;
     }
 

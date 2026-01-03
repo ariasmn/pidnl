@@ -1,0 +1,14 @@
+CompileFlags:
+  Add:
+    - -xc
+    - -I./lib/src
+    - -I./include
+---
+If:
+  PathMatch: .*\.bpf\.c$
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+CompileFlags:
+  Remove: "*"
+  Add: []

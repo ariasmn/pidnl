@@ -104,33 +104,6 @@ static int add_process_list(process_list_t *list, pid_t pid, int is_tcp) {
     return 0;
 }
 
-// Send netlink request to get socket info
-static int send_diag_request(int fd, int family, int protocol) {
-    diag_request_t request;
-    memset(&request, 0, sizeof(request));
-    request.nlh.nlmsg_len = sizeof(request);
-    request.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
-    request.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    request.req.sdiag_family = family;
-    request.req.sdiag_protocol = protocol;
-    request.req.idiag_states = -1;
-    request.req.idiag_ext = 0;
-
-    struct sockaddr_nl nladdr = {.nl_family = AF_NETLINK};
-    struct iovec iov = {.iov_base = &request, .iov_len = sizeof(request)};
-    struct msghdr msg = {.msg_name = &nladdr,
-                         .msg_namelen = sizeof(nladdr),
-                         .msg_iov = &iov,
-                         .msg_iovlen = 1};
-
-    if (sendmsg(fd, &msg, 0) < 0) {
-        perror("sendmsg");
-        return -1;
-    }
-
-    return 0;
-}
-
 // Helper function to find PID by socket inode
 // TODO: Revisit this. Slow and probably unsafe.
 static pid_t find_pid_by_inode(unsigned int inode) {
@@ -165,8 +138,10 @@ static pid_t find_pid_by_inode(unsigned int inode) {
                 continue;
 
             char fd_path[512];
-            snprintf(fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid,
-                     fd_entry->d_name);
+            snprintf(
+                fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid,
+                fd_entry->d_name
+            );
 
             ssize_t len = readlink(fd_path, link, sizeof(link) - 1);
             if (len > 0) {
@@ -191,72 +166,83 @@ static pid_t find_pid_by_inode(unsigned int inode) {
     return -1;
 }
 
-// Receive and parse netlink response
-static int receive_diag_response(int fd, process_list_t *list, int is_tcp) {
-    char buf[SOCKET_BUFFER_SIZE];
-    struct sockaddr_nl nladdr;
-    struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf)};
+static int
+query_sockets(int fd, int family, int protocol, process_list_t *list) {
+    // Send request
+    diag_request_t request;
+    memset(&request, 0, sizeof(request));
+    request.nlh.nlmsg_len = sizeof(request);
+    request.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    request.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.req.sdiag_family = family;
+    request.req.sdiag_protocol = protocol;
+    request.req.idiag_states = -1;
+    request.req.idiag_ext = 0;
 
+    struct sockaddr_nl nladdr = {.nl_family = AF_NETLINK};
+    struct iovec iov = {.iov_base = &request, .iov_len = sizeof(request)};
+    struct msghdr msg = {
+        .msg_name = &nladdr,
+        .msg_namelen = sizeof(nladdr),
+        .msg_iov = &iov,
+        .msg_iovlen = 1
+    };
+
+    if (sendmsg(fd, &msg, 0) < 0) {
+        perror("sendmsg");
+        return -1;
+    }
+
+    // Receive response
+    char buf[SOCKET_BUFFER_SIZE];
     while (1) {
-        struct msghdr msg = {.msg_name = &nladdr,
-                             .msg_namelen = sizeof(nladdr),
-                             .msg_iov = &iov,
-                             .msg_iovlen = 1};
+        iov.iov_base = buf;
+        iov.iov_len = sizeof(buf);
+        msg.msg_iov = &iov;
 
         ssize_t ret = recvmsg(fd, &msg, 0);
         if (ret < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR) {
                 continue;
+            }
             perror("recvmsg");
             return -1;
         }
-        if (ret == 0) {
+        if (ret == 0)
             return 0;
-        }
 
         struct nlmsghdr *h = (struct nlmsghdr *)buf;
         while (NLMSG_OK(h, ret)) {
             if (h->nlmsg_type == NLMSG_DONE) {
                 return 0;
             }
-
             if (h->nlmsg_type == NLMSG_ERROR) {
                 struct nlmsgerr *err = NLMSG_DATA(h);
                 fprintf(stderr, "Netlink error: %s\n", strerror(-err->error));
                 return -1;
             }
-
             if (h->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
                 struct inet_diag_msg *diag = NLMSG_DATA(h);
-
-                // Check if this socket belongs to a user process (uid >= 1000
-                // or root)
                 if (diag->idiag_uid == 0 || diag->idiag_uid >= 1000) {
-                    // Quick scan of /proc to find PID owning this socket
                     pid_t pid = find_pid_by_inode(diag->idiag_inode);
                     if (pid > 0) {
-                        add_process_list(list, pid, is_tcp);
+                        // Use protocol directly
+                        add_process_list(list, pid, protocol == IPPROTO_TCP);
                     }
                 }
             }
-
             h = NLMSG_NEXT(h, ret);
         }
     }
-
-    return 0;
 }
 
 process_list_t *get_network_processes(void) {
-    int fd;
-    process_list_t *list;
-
-    // Create and bind Netlink socket
-    fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_SOCK_DIAG);
+    int fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_SOCK_DIAG);
     if (fd < 0) {
         perror("socket(AF_NETLINK)");
         return NULL;
     }
+
     struct sockaddr_nl nladdr = {.nl_family = AF_NETLINK};
     if (bind(fd, (struct sockaddr *)&nladdr, sizeof(nladdr)) < 0) {
         perror("bind(AF_NETLINK)");
@@ -264,25 +250,17 @@ process_list_t *get_network_processes(void) {
         return NULL;
     }
 
-    list = create_process_list();
+    process_list_t *list = create_process_list();
     if (!list) {
         close(fd);
         return NULL;
     }
 
-    // Query all TCP/UDP sockets
-    if (send_diag_request(fd, AF_INET, IPPROTO_TCP) == 0) {
-        receive_diag_response(fd, list, 1);
-    }
-    if (send_diag_request(fd, AF_INET6, IPPROTO_TCP) == 0) {
-        receive_diag_response(fd, list, 1);
-    }
-    if (send_diag_request(fd, AF_INET, IPPROTO_UDP) == 0) {
-        receive_diag_response(fd, list, 0);
-    }
-    if (send_diag_request(fd, AF_INET6, IPPROTO_UDP) == 0) {
-        receive_diag_response(fd, list, 0);
-    }
+    // Cleaner - no redundant parameter
+    query_sockets(fd, AF_INET, IPPROTO_TCP, list);
+    query_sockets(fd, AF_INET6, IPPROTO_TCP, list);
+    query_sockets(fd, AF_INET, IPPROTO_UDP, list);
+    query_sockets(fd, AF_INET6, IPPROTO_UDP, list);
 
     close(fd);
     return list;
@@ -358,7 +336,8 @@ static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
 
 // Load and attach eBPF programs to cgroup
 // Fills the rate_limiter struct with bpf_obj, cgroup_fd, and rate_limits_map_fd
-static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t config) {
+static int
+attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t config) {
     struct bpf_object *obj;
     struct bpf_program *egress_prog, *ingress_prog;
     struct bpf_map *rate_limits_map;
@@ -406,15 +385,19 @@ static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t conf
     download_bps = (__u64)config.download_kbps * 1000 / 8;
 
     // Direction UPLOAD
-    err = bpf_map_update_elem(limiter->rate_limits_map_fd,
-                              &(unsigned int){DIRECTION_UPLOAD}, &upload_bps, 0);
+    err = bpf_map_update_elem(
+        limiter->rate_limits_map_fd, &(unsigned int){DIRECTION_UPLOAD},
+        &upload_bps, 0
+    );
     if (err) {
         fprintf(stderr, "Failed to set upload limit in map: %d\n", err);
     }
 
     // Direction DOWNLOAD
-    err = bpf_map_update_elem(limiter->rate_limits_map_fd,
-                              &(unsigned int){DIRECTION_DOWNLOAD}, &download_bps, 0);
+    err = bpf_map_update_elem(
+        limiter->rate_limits_map_fd, &(unsigned int){DIRECTION_DOWNLOAD},
+        &download_bps, 0
+    );
     if (err) {
         fprintf(stderr, "Failed to set download limit in map: %d\n", err);
     }
@@ -425,8 +408,10 @@ static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t conf
     // Open cgroup
     cgroup_fd = open(limiter->cgroup_path, O_RDONLY);
     if (cgroup_fd < 0) {
-        fprintf(stderr, "Failed to open cgroup %s: %s\n", limiter->cgroup_path,
-                strerror(errno));
+        fprintf(
+            stderr, "Failed to open cgroup %s: %s\n", limiter->cgroup_path,
+            strerror(errno)
+        );
         bpf_object__close(obj);
         return -1;
     }
@@ -434,8 +419,9 @@ static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t conf
     // Attach egress program
     err = bpf_prog_attach(egress_fd, cgroup_fd, BPF_CGROUP_INET_EGRESS, 0);
     if (err) {
-        fprintf(stderr, "Failed to attach egress program: %s\n",
-                strerror(errno));
+        fprintf(
+            stderr, "Failed to attach egress program: %s\n", strerror(errno)
+        );
         close(cgroup_fd);
         bpf_object__close(obj);
         return -1;
@@ -444,8 +430,9 @@ static int attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t conf
     // Attach ingress program
     err = bpf_prog_attach(ingress_fd, cgroup_fd, BPF_CGROUP_INET_INGRESS, 0);
     if (err) {
-        fprintf(stderr, "Failed to attach ingress program: %s\n",
-                strerror(errno));
+        fprintf(
+            stderr, "Failed to attach ingress program: %s\n", strerror(errno)
+        );
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
         close(cgroup_fd);
         bpf_object__close(obj);
@@ -469,8 +456,9 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
         // Try legacy path
         fd = open("/sys/fs/cgroup/tasks", O_WRONLY);
         if (fd < 0) {
-            fprintf(stderr, "Failed to open root cgroup: %s\n",
-                    strerror(errno));
+            fprintf(
+                stderr, "Failed to open root cgroup: %s\n", strerror(errno)
+            );
             return -1;
         }
     }
