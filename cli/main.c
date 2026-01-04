@@ -1,4 +1,5 @@
-#include "strait.h"
+#include "../lib/src/discovery.h"
+#include "../lib/src/ratelimit.h"
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>

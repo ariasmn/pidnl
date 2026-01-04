@@ -13,7 +13,7 @@ LIBNL_LDFLAGS = $(shell pkg-config --libs libnl-3.0 libnl-route-3.0 2>/dev/null)
 LIBBPF_LDFLAGS = -lbpf -lelf -lz
 
 # Library
-LIB_OBJ = $(LIBSRC)/strait.o
+LIB_OBJ = $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o
 
 # CLI
 CLI_OBJ = cli/main.o
