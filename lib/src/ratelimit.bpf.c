@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <linux/types.h>
 #include <bpf/bpf_helpers.h>
 #include <linux/bpf.h>
-#include <linux/types.h>
 
 // Direction constants (used by both rate_limits and rate_state maps)
 #define DIRECTION_UPLOAD 0   // Upload traffic (egress, leaving the system)
