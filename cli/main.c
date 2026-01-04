@@ -1,5 +1,5 @@
-#include "../lib/src/discovery.h"
-#include "../lib/src/ratelimit.h"
+#include "discovery.h"
+#include "ratelimit.h"
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>

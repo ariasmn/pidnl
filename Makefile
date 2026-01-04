@@ -25,7 +25,7 @@ BPF_OBJ = $(LIBSRC)/ratelimit.bpf.o
 
 .PHONY: all clean cli check-asan check-libbpf bpf
 
-all: check-asan cli
+all: check-asan bpf cli
 
 check-asan:
 	@echo "int main(void){return 0;}" | $(CC) -fsanitize=address -x c - -o /dev/null 2>/dev/null || \
