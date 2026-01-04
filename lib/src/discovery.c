@@ -18,16 +18,16 @@
 typedef struct {
     struct nlmsghdr nlh;
     struct inet_diag_req_v2 req;
-} diag_request_t;
+} diag_request;
 
-static process_list_t *create_process_list(void) {
-    process_list_t *list = malloc(sizeof(process_list_t));
+static process_list *create_process_list(void) {
+    process_list *list = malloc(sizeof(process_list));
     if (!list)
         return NULL;
 
     list->capacity = 64;
     list->count = 0;
-    list->processes = malloc(sizeof(process_info_t) * list->capacity);
+    list->processes = malloc(sizeof(process_info) * list->capacity);
 
     if (!list->processes) {
         free(list);
@@ -37,7 +37,7 @@ static process_list_t *create_process_list(void) {
     return list;
 }
 
-static int add_process_list(process_list_t *list, pid_t pid, int is_tcp) {
+static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
     for (size_t i = 0; i < list->count; i++) {
         if (list->processes[i].pid == pid) {
             list->processes[i].num_connections++;
@@ -52,16 +52,16 @@ static int add_process_list(process_list_t *list, pid_t pid, int is_tcp) {
 
     if (list->count >= list->capacity) {
         list->capacity *= 2;
-        process_info_t *new_processes =
-            realloc(list->processes, sizeof(process_info_t) * list->capacity);
+        process_info *new_processes =
+            realloc(list->processes, sizeof(process_info) * list->capacity);
         if (!new_processes) {
             return -1;
         }
         list->processes = new_processes;
     }
 
-    process_info_t *proc = &list->processes[list->count];
-    memset(proc, 0, sizeof(process_info_t));
+    process_info *proc = &list->processes[list->count];
+    memset(proc, 0, sizeof(process_info));
     proc->pid = pid;
     proc->num_connections = 1;
     proc->has_tcp = is_tcp;
@@ -146,9 +146,8 @@ static pid_t find_pid_by_inode(unsigned int inode) {
     return -1;
 }
 
-static int
-query_sockets(int fd, int family, int protocol, process_list_t *list) {
-    diag_request_t request;
+static int query_sockets(int fd, int family, int protocol, process_list *list) {
+    diag_request request;
     memset(&request, 0, sizeof(request));
     request.nlh.nlmsg_len = sizeof(request);
     request.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
@@ -213,7 +212,7 @@ query_sockets(int fd, int family, int protocol, process_list_t *list) {
     }
 }
 
-process_list_t *get_network_processes(void) {
+process_list *get_network_processes(void) {
     int fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_SOCK_DIAG);
     if (fd < 0) {
         perror("socket(AF_NETLINK)");
@@ -227,7 +226,7 @@ process_list_t *get_network_processes(void) {
         return NULL;
     }
 
-    process_list_t *list = create_process_list();
+    process_list *list = create_process_list();
     if (!list) {
         close(fd);
         return NULL;
@@ -242,7 +241,7 @@ process_list_t *get_network_processes(void) {
     return list;
 }
 
-void destroy_process_list(process_list_t *list) {
+void destroy_process_list(process_list *list) {
     if (!list)
         return;
     free(list->processes);

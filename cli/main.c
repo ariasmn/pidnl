@@ -1,5 +1,5 @@
-#include "discovery.h"
-#include "ratelimit.h"
+#include "../lib/src/discovery.h"
+#include "../lib/src/ratelimit.h"
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
@@ -16,19 +16,27 @@ static const char *program_usage =
     "  limit               Limit bandwidth for a process\n"
     "  help                Display this help message\n\n"
     "Options:\n"
-    "  -h, --help          Display this help message\n";
+    "  -h, --help          Display this help message";
 
-typedef void (*cmd_handler_t)(int argc, char *argv[]);
+static const char *limit_usage =
+    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> [<download_kbps>]\n"
+    "       " PROGRAM_NAME " limit unset <pid>\n\n"
+    "Commands:\n"
+    "  set <pid> <upload> [<download>]  Limit bandwidth for a process\n"
+    "  unset <pid>                      Remove rate limit for a process\n\n"
+    "Examples:\n"
+    "  " PROGRAM_NAME " limit set 12345 1000 2000\n"
+    "  " PROGRAM_NAME " limit unset 12345";
+
+typedef void (*cmd_handler)(int argc, char *argv[]);
 
 typedef struct {
     const char *name;
     const char *description;
-    cmd_handler_t handler;
-} command_t;
+    cmd_handler handler;
+} command;
 
-static rate_limiter_t *g_limiter = NULL;
-
-static void print_process_list(process_list_t *list) {
+static void print_process_list(process_list *list) {
     printf(
         "%-8s %-20s %-10s %-10s %s\n", "PID", "NAME", "TCP", "UDP", "EXECUTABLE"
     );
@@ -37,7 +45,7 @@ static void print_process_list(process_list_t *list) {
     );
 
     for (size_t i = 0; i < list->count; i++) {
-        process_info_t *proc = &list->processes[i];
+        process_info *proc = &list->processes[i];
         printf(
             "%-8d %-20s %-10s %-10s %s\n", proc->pid, proc->process_name,
             proc->has_tcp ? "Yes" : "No", proc->has_udp ? "Yes" : "No",
@@ -50,7 +58,7 @@ static void cmd_list(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
-    process_list_t *list = get_network_processes();
+    process_list *list = get_network_processes();
     if (!list) {
         fprintf(stderr, "Failed to discover processes\n");
         exit(EXIT_FAILURE);
@@ -60,26 +68,9 @@ static void cmd_list(int argc, char *argv[]) {
     destroy_process_list(list);
 }
 
-static void cleanup_handler(int sig) {
-    (void)sig;
-    if (g_limiter) {
-        printf("\nCleaning up rate limiter...\n");
-        destroy_rate_limiter(g_limiter);
-        g_limiter = NULL;
-    }
-    exit(0);
-}
-
-static void cmd_limit(int argc, char *argv[]) {
+static void cmd_limit_set(int argc, char *argv[]) {
     int help_shown = 0;
 
-    // Skip command name if present
-    if (argc > 0 && strcmp(argv[0], "limit") == 0) {
-        argv++;
-        argc--;
-    }
-
-    // Check for --help
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             help_shown = 1;
@@ -87,34 +78,9 @@ static void cmd_limit(int argc, char *argv[]) {
         }
     }
 
-    if (help_shown) {
-        printf(
-            "Usage: %s limit [OPTIONS] <pid> <upload_kbps> "
-            "[<download_kbps>]\n\n"
-            "Limit bandwidth for a process using eBPF and cgroups.\n\n"
-            "Arguments:\n"
-            "  pid                 Process ID to limit\n"
-            "  upload_kbps         Upload rate limit in kbps (0 = unlimited)\n"
-            "  download_kbps       Download rate limit in kbps (0 = "
-            "unlimited)\n\n"
-            "Options:\n"
-            "  -h, --help          Display this help message\n\n"
-            "Example:\n"
-            "  %s limit 12345 1000 2000\n"
-            "  (Limits process 12345 to 1000 kbps upload, 2000 kbps "
-            "download)\n",
-            PROGRAM_NAME, PROGRAM_NAME
-        );
+    if (help_shown || argc < 2) {
+        printf("%s\n", limit_usage);
         exit(EXIT_SUCCESS);
-    }
-
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "%s: missing or invalid arguments\n", PROGRAM_NAME);
-        fprintf(
-            stderr, "Try '%s limit --help' for more information.\n",
-            PROGRAM_NAME
-        );
-        exit(EXIT_FAILURE);
     }
 
     pid_t pid = (pid_t)atoi(argv[0]);
@@ -126,14 +92,13 @@ static void cmd_limit(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Check for root
     if (geteuid() != 0) {
         fprintf(
             stderr, "%s: this command requires root privileges\n", PROGRAM_NAME
         );
         fprintf(stderr, "Try running with sudo:\n");
         fprintf(
-            stderr, "  sudo %s limit <pid> <upload_kbps> [<download_kbps>]\n",
+            stderr, "  sudo %s limit set <pid> <upload> [<download>]\n",
             PROGRAM_NAME
         );
         exit(EXIT_FAILURE);
@@ -143,28 +108,111 @@ static void cmd_limit(int argc, char *argv[]) {
         .upload_kbps = upload_kbps, .download_kbps = download_kbps
     };
 
+    rate_limiter *limiter = limit_process_bandwidth(pid, config);
+    if (!limiter) {
+        fprintf(stderr, "%s: failed to limit bandwidth\n", PROGRAM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
     printf("Limiting PID %d to %u kbps upload", pid, upload_kbps);
     if (download_kbps > 0) {
         printf(", %u kbps download", download_kbps);
     }
     printf("\n");
 
-    g_limiter = limit_process_bandwidth(pid, config);
-    if (!g_limiter) {
-        fprintf(stderr, "%s: failed to limit bandwidth\n", PROGRAM_NAME);
+    close_rate_limiter_handle(limiter);
+}
+
+static void cmd_limit_unset(int argc, char *argv[]) {
+    int help_shown = 0;
+
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            help_shown = 1;
+            break;
+        }
+    }
+
+    if (help_shown || argc < 1) {
+        printf("%s\n", limit_usage);
+        exit(EXIT_SUCCESS);
+    }
+
+    pid_t pid = (pid_t)atoi(argv[0]);
+
+    if (pid <= 0) {
+        fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    // Setup signal handler for cleanup
-    signal(SIGINT, cleanup_handler);
-    signal(SIGTERM, cleanup_handler);
+    if (geteuid() != 0) {
+        fprintf(
+            stderr, "%s: this command requires root privileges\n", PROGRAM_NAME
+        );
+        fprintf(stderr, "Try running with sudo:\n");
+        fprintf(stderr, "  sudo %s limit unset <pid>\n", PROGRAM_NAME);
+        exit(EXIT_FAILURE);
+    }
 
-    printf("\nRate limiting active. Press Ctrl+C to exit.\n");
-    printf("Note: The rate limit will be removed when this process exits.\n");
+    int err = unregister_rate_limiter_by_pid(pid);
+    if (err) {
+        fprintf(
+            stderr, "%s: no rate limit set for PID %d\n", PROGRAM_NAME, pid
+        );
+        exit(EXIT_FAILURE);
+    }
 
-    // Keep running
-    while (1) {
-        sleep(1);
+    printf("Removed rate limit for PID %d\n", pid);
+}
+
+static void cmd_limit(int argc, char *argv[]) {
+    int help_shown = 0;
+
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            help_shown = 1;
+            break;
+        }
+    }
+
+    if (help_shown) {
+        printf("%s\n", limit_usage);
+        exit(EXIT_SUCCESS);
+    }
+
+    if (argc < 1) {
+        fprintf(stderr, "missing subcommand\n");
+        fprintf(
+            stderr, "Try '%s limit --help' for more information.\n",
+            PROGRAM_NAME
+        );
+        exit(EXIT_FAILURE);
+    }
+
+    if (strcmp(argv[0], "limit") == 0) {
+        argv++;
+        argc--;
+        if (argc < 1) {
+            fprintf(stderr, "missing subcommand\n");
+            fprintf(
+                stderr, "Try '%s limit --help' for more information.\n",
+                PROGRAM_NAME
+            );
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (strcmp(argv[0], "set") == 0) {
+        cmd_limit_set(argc - 1, argv + 1);
+    } else if (strcmp(argv[0], "unset") == 0) {
+        cmd_limit_unset(argc - 1, argv + 1);
+    } else {
+        fprintf(stderr, "unknown subcommand: %s\n", argv[0]);
+        fprintf(
+            stderr, "Try '%s limit --help' for more information.\n",
+            PROGRAM_NAME
+        );
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -172,10 +220,10 @@ static void cmd_help(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
-    printf("%s", program_usage);
+    printf("%s\n", program_usage);
 }
 
-static const command_t commands[] = {
+static const command commands[] = {
     {"list", "List processes with network connections", cmd_list},
     {"limit", "Limit bandwidth for a process", cmd_limit},
     {"help", "Display this help message", cmd_help},
@@ -183,7 +231,7 @@ static const command_t commands[] = {
 
 static const size_t num_commands = sizeof(commands) / sizeof(commands[0]);
 
-static const command_t *find_command(const char *name) {
+static const command *find_command(const char *name) {
     for (size_t i = 0; i < num_commands; i++) {
         if (strcmp(commands[i].name, name) == 0) {
             return &commands[i];
@@ -199,12 +247,9 @@ static void print_command_list(void) {
 }
 
 int main(int argc, char *argv[]) {
-    // Check for global --help or -h before any command
     int global_help = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            // Show global help only if this -h/--help is at the beginning
-            // and there's no command after it
             if (i == 1) {
                 global_help = 1;
             }
@@ -213,11 +258,10 @@ int main(int argc, char *argv[]) {
     }
 
     if (global_help) {
-        printf("%s", program_usage);
+        printf("%s\n", program_usage);
         return EXIT_SUCCESS;
     }
 
-    // Check if there's no command (no non-option argument)
     int cmd_index = -1;
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] != '-') {
@@ -236,8 +280,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Dispatch to command
-    const command_t *cmd = find_command(argv[cmd_index]);
+    const command *cmd = find_command(argv[cmd_index]);
     if (cmd) {
         cmd->handler(argc - cmd_index, argv + cmd_index);
     } else {

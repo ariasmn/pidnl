@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef BPF_OBJECT_PATH
@@ -19,11 +20,9 @@
 #define DIRECTION_DOWNLOAD 1
 
 struct rate_limiter {
-    pid_t pid;
     char cgroup_path[512];
     struct bpf_object *bpf_obj;
     int cgroup_fd;
-    int rate_limits_map_fd;
 };
 
 static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
@@ -33,7 +32,7 @@ static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
 
     snprintf(cgroup_path, path_size, "%s_pid_%d", CGROUP_PATH, pid);
 
-    char cmd[512];
+    char cmd[1024];
     snprintf(cmd, sizeof(cmd), "mkdir -p %s 2>/dev/null || true", cgroup_path);
     ret = system(cmd);
     if (ret != 0) {
@@ -63,7 +62,7 @@ static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
 }
 
 static int
-attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t config) {
+attach_bpf_programs(rate_limiter *limiter, rate_limit_config_t config) {
     struct bpf_object *obj;
     struct bpf_program *egress_prog, *ingress_prog;
     struct bpf_map *rate_limits_map;
@@ -101,22 +100,21 @@ attach_bpf_programs(rate_limiter_t *limiter, rate_limit_config_t config) {
         return -1;
     }
 
-    limiter->rate_limits_map_fd = bpf_map__fd(rate_limits_map);
+    int rate_limits_map_fd = bpf_map__fd(rate_limits_map);
 
     upload_bps = (__u64)config.upload_kbps * 1000 / 8;
     download_bps = (__u64)config.download_kbps * 1000 / 8;
 
     err = bpf_map_update_elem(
-        limiter->rate_limits_map_fd, &(unsigned int){DIRECTION_UPLOAD},
-        &upload_bps, 0
+        rate_limits_map_fd, &(unsigned int){DIRECTION_UPLOAD}, &upload_bps, 0
     );
     if (err) {
         fprintf(stderr, "Failed to set upload limit in map: %d\n", err);
     }
 
     err = bpf_map_update_elem(
-        limiter->rate_limits_map_fd, &(unsigned int){DIRECTION_DOWNLOAD},
-        &download_bps, 0
+        rate_limits_map_fd, &(unsigned int){DIRECTION_DOWNLOAD}, &download_bps,
+        0
     );
     if (err) {
         fprintf(stderr, "Failed to set download limit in map: %d\n", err);
@@ -170,9 +168,6 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     if (fd < 0) {
         fd = open("/sys/fs/cgroup/tasks", O_WRONLY);
         if (fd < 0) {
-            fprintf(
-                stderr, "Failed to open root cgroup: %s\n", strerror(errno)
-            );
             return -1;
         }
     }
@@ -181,29 +176,52 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     write(fd, pid_str, strlen(pid_str));
     close(fd);
 
-    char cmd[512];
+    char cmd[1024];
     snprintf(cmd, sizeof(cmd), "rmdir %s 2>/dev/null || true", cgroup_path);
     system(cmd);
 
     return 0;
 }
 
-rate_limiter_t *limit_process_bandwidth(pid_t pid, rate_limit_config_t config) {
-    rate_limiter_t *limiter;
+int cleanup_orphaned_cgroup(pid_t pid) {
+    char cgroup_path[512];
+    struct stat st;
+
+    snprintf(cgroup_path, sizeof(cgroup_path), "%s_pid_%d", CGROUP_PATH, pid);
+
+    if (stat(cgroup_path, &st) != 0) {
+        return 0;
+    }
+
+    int cgroup_fd = open(cgroup_path, O_RDONLY);
+    if (cgroup_fd >= 0) {
+        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
+        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
+        close(cgroup_fd);
+    }
+
+    cleanup_cgroup(pid, cgroup_path);
+
+    return 0;
+}
+
+rate_limiter *limit_process_bandwidth(pid_t pid, rate_limit_config_t config) {
+    rate_limiter *limiter;
 
     if (pid <= 0) {
         fprintf(stderr, "Invalid PID: %d\n", pid);
         return NULL;
     }
 
-    limiter = malloc(sizeof(rate_limiter_t));
+    cleanup_orphaned_cgroup(pid);
+
+    limiter = malloc(sizeof(rate_limiter));
     if (!limiter) {
         fprintf(stderr, "Failed to allocate rate limiter\n");
         return NULL;
     }
 
-    memset(limiter, 0, sizeof(rate_limiter_t));
-    limiter->pid = pid;
+    memset(limiter, 0, sizeof(rate_limiter));
 
     if (setup_cgroup(pid, limiter->cgroup_path, sizeof(limiter->cgroup_path))) {
         fprintf(stderr, "Failed to setup cgroup\n");
@@ -221,23 +239,35 @@ rate_limiter_t *limit_process_bandwidth(pid_t pid, rate_limit_config_t config) {
     return limiter;
 }
 
-void destroy_rate_limiter(rate_limiter_t *limiter) {
+void close_rate_limiter_handle(rate_limiter *limiter) {
     if (!limiter)
         return;
-
-    if (limiter->cgroup_fd >= 0) {
-        bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
-        bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_INGRESS);
-        close(limiter->cgroup_fd);
-    }
 
     if (limiter->bpf_obj) {
         bpf_object__close(limiter->bpf_obj);
     }
 
-    if (limiter->cgroup_path[0] != '\0') {
-        cleanup_cgroup(limiter->pid, limiter->cgroup_path);
+    free(limiter);
+}
+
+int unregister_rate_limiter_by_pid(pid_t pid) {
+    char cgroup_path[512];
+    struct stat st;
+
+    snprintf(cgroup_path, sizeof(cgroup_path), "%s_pid_%d", CGROUP_PATH, pid);
+
+    if (stat(cgroup_path, &st) != 0) {
+        return -1;
     }
 
-    free(limiter);
+    int cgroup_fd = open(cgroup_path, O_RDONLY);
+    if (cgroup_fd >= 0) {
+        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
+        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
+        close(cgroup_fd);
+    }
+
+    cleanup_cgroup(pid, cgroup_path);
+
+    return 0;
 }

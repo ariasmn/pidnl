@@ -10,16 +10,16 @@ typedef struct {
     int num_connections;
     int has_tcp;
     int has_udp;
-} process_info_t;
+} process_info;
 
 typedef struct {
-    process_info_t *processes;
+    process_info *processes;
     size_t count;
     size_t capacity;
-} process_list_t;
+} process_list;
 
-process_list_t *get_network_processes(void);
+process_list *get_network_processes(void);
 
-void destroy_process_list(process_list_t *list);
+void destroy_process_list(process_list *list);
 
 #endif
