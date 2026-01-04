@@ -13,8 +13,7 @@ struct rate_limit_state {
     __u64 last_update_ns;
 };
 
-// Map to store rate limit state per direction (DIRECTION_UPLOAD=0,
-// DIRECTION_DOWNLOAD=1)
+// Map to store rate limit state per direction
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 2);
@@ -23,7 +22,6 @@ struct {
 } rate_state SEC(".maps");
 
 // Map to store rate limits in bytes per second (read from userspace)
-// Key DIRECTION_UPLOAD = upload limit, Key DIRECTION_DOWNLOAD = download limit
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 2);
@@ -32,6 +30,9 @@ struct {
 } rate_limits SEC(".maps");
 
 // Token bucket rate limiting
+// TODO: This drops requests instead of delaying them.
+// We need to revisit this since it's also not super reliable, but enough to
+// work on all the logic and later change the algorithm.
 // Returns: 1 = allow, 0 = drop
 static __always_inline int
 apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
