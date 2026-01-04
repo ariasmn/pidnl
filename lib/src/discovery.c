@@ -1,18 +1,16 @@
 #include "discovery.h"
 
-#include <arpa/inet.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
-#include <linux/rtnetlink.h>
 #include <linux/sock_diag.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #define SOCKET_BUFFER_SIZE (getpagesize() < 8192L ? getpagesize() : 8192L)
