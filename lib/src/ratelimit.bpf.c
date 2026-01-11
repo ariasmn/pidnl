@@ -68,7 +68,6 @@ apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
     return 0;
 }
 
-// This means "attach to a cgroup, and run at the socket buffer level"
 SEC("cgroup/skb") int egress_rate_limit(struct __sk_buff *skb) {
     __u32 key = DIRECTION_UPLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);

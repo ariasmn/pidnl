@@ -24,7 +24,7 @@ $(LIBSRC)/%.o: $(LIBSRC)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 cli/%.o: cli/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
 
 clean:
 	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ)
