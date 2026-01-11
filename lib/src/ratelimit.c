@@ -181,44 +181,13 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config_t config) {
     return 0;
 }
 
-static int remove_child_cgroup(const char *cgroup_path) {
+static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
+    int fd;
+    char pid_str[32];
     int dir_fd;
     DIR *d;
     struct dirent *entry;
     char entry_path[512];
-
-    dir_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY);
-    if (dir_fd < 0) {
-        return -1;
-    }
-
-    d = fdopendir(dir_fd);
-    if (d == NULL) {
-        close(dir_fd);
-        return -1;
-    }
-
-    while ((entry = readdir(d)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 ||
-            strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
-
-        snprintf(
-            entry_path, sizeof(entry_path), "%s/%s", cgroup_path,
-            entry->d_name
-        );
-
-        unlink(entry_path);
-    }
-
-    closedir(d);
-    return rmdir(cgroup_path);
-}
-
-static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
-    int fd;
-    char pid_str[32];
 
     fd = open("/sys/fs/cgroup/cgroup.procs", O_WRONLY);
     if (fd < 0) {
@@ -229,7 +198,26 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     write(fd, pid_str, strlen(pid_str));
     close(fd);
 
-    remove_child_cgroup(cgroup_path);
+    dir_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY);
+    if (dir_fd >= 0) {
+        d = fdopendir(dir_fd);
+        if (d != NULL) {
+            while ((entry = readdir(d)) != NULL) {
+                if (strcmp(entry->d_name, ".") == 0 ||
+                    strcmp(entry->d_name, "..") == 0) {
+                    continue;
+                }
+                snprintf(
+                    entry_path, sizeof(entry_path), "%s/%s", cgroup_path,
+                    entry->d_name
+                );
+                unlink(entry_path);
+            }
+            closedir(d);
+        }
+        close(dir_fd);
+    }
+    rmdir(cgroup_path);
 
     return 0;
 }
