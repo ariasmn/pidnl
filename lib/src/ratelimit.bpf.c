@@ -48,7 +48,7 @@ apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
 
     // Calculate tokens to add based on elapsed time
     elapsed_ns = now - state->last_update_ns;
-    tokens_to_add = (elapsed_ns / 1000000) * limit_bps / 1000;
+    tokens_to_add = (limit_bps / 1000000) * (elapsed_ns / 1000);
 
     state->tokens += tokens_to_add;
     state->last_update_ns = now;
