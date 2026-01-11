@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/inet_diag.h>
+#include <linux/limits.h>
 #include <linux/netlink.h>
 #include <linux/sock_diag.h>
 #include <netinet/in.h>
@@ -13,7 +14,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define SOCKET_BUFFER_SIZE (getpagesize() < 8192L ? getpagesize() : 8192L)
+#define PROC_PATH_MAX 64
+#define SOCKET_LINK_MAX 64
+
+/*
+ * Netlink socket buffer size.
+ * Page size varies by architecture (typically 4096 bytes).
+ */
+#define SOCKET_BUFFER_SIZE getpagesize()
 
 typedef struct {
     struct nlmsghdr nlh;
@@ -67,7 +75,7 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
     proc->has_tcp = is_tcp;
     proc->has_udp = !is_tcp;
 
-    char path[64];
+    char path[PROC_PATH_MAX];
     snprintf(path, sizeof(path), "/proc/%d/comm", pid);
     FILE *f = fopen(path, "r");
     if (f) {
@@ -91,8 +99,8 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
 }
 
 static pid_t find_pid_by_inode(unsigned int inode) {
-    char path[64];
-    char link[64];
+    char path[PROC_PATH_MAX];
+    char link[SOCKET_LINK_MAX];
 
     DIR *proc_dir = opendir("/proc");
     if (!proc_dir)
@@ -118,7 +126,7 @@ static pid_t find_pid_by_inode(unsigned int inode) {
             if (fd_entry->d_name[0] == '.')
                 continue;
 
-            char fd_path[512];
+            char fd_path[PATH_MAX];
             snprintf(
                 fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid,
                 fd_entry->d_name

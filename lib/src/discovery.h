@@ -1,12 +1,14 @@
 #ifndef DISCOVERY_H
 #define DISCOVERY_H
 
+#include <linux/limits.h>
+#include <linux/taskstats.h>
 #include <sys/types.h>
 
 typedef struct {
     pid_t pid;
-    char process_name[256];
-    char exe_path[512];
+    char process_name[TS_COMM_LEN];
+    char exe_path[PATH_MAX];
     int num_connections;
     int has_tcp;
     int has_udp;

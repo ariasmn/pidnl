@@ -5,11 +5,14 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#define PID_STR_MAX 8
 
 #ifndef BPF_OBJECT_PATH
 #define BPF_OBJECT_PATH "lib/src/ratelimit.bpf.o"
@@ -23,7 +26,7 @@
 #define DIRECTION_DOWNLOAD 1
 
 struct rate_limiter {
-    char cgroup_path[512];
+    char cgroup_path[PATH_MAX];
     struct bpf_object *bpf_obj;
     int cgroup_fd;
 };
@@ -47,7 +50,7 @@ static int ensure_parent_cgroup() {
 
 static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
     int fd;
-    char pid_str[32];
+    char pid_str[PID_STR_MAX];
     int ret;
 
     if (ensure_parent_cgroup() != 0) {
@@ -61,7 +64,7 @@ static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
         return -1;
     }
 
-    char procs_path[512];
+    char procs_path[PATH_MAX];
     snprintf(procs_path, sizeof(procs_path), "%s/cgroup.procs", cgroup_path);
 
     fd = open(procs_path, O_WRONLY);
@@ -183,11 +186,10 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config_t config) {
 
 static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     int fd;
-    char pid_str[32];
+    char pid_str[PID_STR_MAX];
     int dir_fd;
     DIR *d;
     struct dirent *entry;
-    char entry_path[512];
 
     fd = open("/sys/fs/cgroup/cgroup.procs", O_WRONLY);
     if (fd < 0) {
@@ -207,11 +209,7 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
                     strcmp(entry->d_name, "..") == 0) {
                     continue;
                 }
-                snprintf(
-                    entry_path, sizeof(entry_path), "%s/%s", cgroup_path,
-                    entry->d_name
-                );
-                unlink(entry_path);
+                unlinkat(dir_fd, entry->d_name, 0);
             }
             closedir(d);
         }
@@ -222,8 +220,8 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     return 0;
 }
 
-int cleanup_orphaned_cgroup(pid_t pid) {
-    char cgroup_path[512];
+static int cleanup_orphaned_cgroup(pid_t pid) {
+    char cgroup_path[PATH_MAX];
     struct stat st;
 
     snprintf(cgroup_path, sizeof(cgroup_path), "%s/%d", CGROUP_PATH, pid);
@@ -290,7 +288,7 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
 }
 
 int unregister_rate_limiter_by_pid(pid_t pid) {
-    char cgroup_path[512];
+    char cgroup_path[PATH_MAX];
     struct stat st;
 
     snprintf(cgroup_path, sizeof(cgroup_path), "%s/%d", CGROUP_PATH, pid);
