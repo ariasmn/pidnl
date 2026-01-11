@@ -2,6 +2,7 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -14,7 +15,9 @@
 #define BPF_OBJECT_PATH "lib/src/ratelimit.bpf.o"
 #endif
 
-#define CGROUP_PATH "/sys/fs/cgroup/strait_rate_limit"
+#define CGROUP_PARENT "strait"
+#define CGROUP_ROOT "/sys/fs/cgroup"
+#define CGROUP_PATH CGROUP_ROOT "/" CGROUP_PARENT
 
 #define DIRECTION_UPLOAD 0
 #define DIRECTION_DOWNLOAD 1
@@ -25,18 +28,36 @@ struct rate_limiter {
     int cgroup_fd;
 };
 
+static int ensure_parent_cgroup() {
+    struct stat st;
+
+    if (stat(CGROUP_PATH, &st) == 0) {
+        return 0;
+    }
+
+    if (mkdir(CGROUP_PATH, 0755) != 0 && errno != EEXIST) {
+        fprintf(
+            stderr, "Failed to create parent cgroup: %s\n", strerror(errno)
+        );
+        return -1;
+    }
+
+    return 0;
+}
+
 static int setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
     int fd;
     char pid_str[32];
     int ret;
 
-    snprintf(cgroup_path, path_size, "%s_pid_%d", CGROUP_PATH, pid);
+    if (ensure_parent_cgroup() != 0) {
+        return -1;
+    }
 
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "mkdir -p %s 2>/dev/null || true", cgroup_path);
-    ret = system(cmd);
-    if (ret != 0) {
-        fprintf(stderr, "Failed to create cgroup directory\n");
+    snprintf(cgroup_path, path_size, "%s/%d", CGROUP_PATH, pid);
+
+    if (mkdir(cgroup_path, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "Failed to create cgroup: %s\n", strerror(errno));
         return -1;
     }
 
@@ -160,25 +181,55 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config_t config) {
     return 0;
 }
 
+static int remove_child_cgroup(const char *cgroup_path) {
+    int dir_fd;
+    DIR *d;
+    struct dirent *entry;
+    char entry_path[512];
+
+    dir_fd = open(cgroup_path, O_RDONLY | O_DIRECTORY);
+    if (dir_fd < 0) {
+        return -1;
+    }
+
+    d = fdopendir(dir_fd);
+    if (d == NULL) {
+        close(dir_fd);
+        return -1;
+    }
+
+    while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        snprintf(
+            entry_path, sizeof(entry_path), "%s/%s", cgroup_path,
+            entry->d_name
+        );
+
+        unlink(entry_path);
+    }
+
+    closedir(d);
+    return rmdir(cgroup_path);
+}
+
 static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
     int fd;
     char pid_str[32];
 
     fd = open("/sys/fs/cgroup/cgroup.procs", O_WRONLY);
     if (fd < 0) {
-        fd = open("/sys/fs/cgroup/tasks", O_WRONLY);
-        if (fd < 0) {
-            return -1;
-        }
+        return -1;
     }
 
     snprintf(pid_str, sizeof(pid_str), "%d", pid);
     write(fd, pid_str, strlen(pid_str));
     close(fd);
 
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "rmdir %s 2>/dev/null || true", cgroup_path);
-    system(cmd);
+    remove_child_cgroup(cgroup_path);
 
     return 0;
 }
@@ -187,7 +238,7 @@ int cleanup_orphaned_cgroup(pid_t pid) {
     char cgroup_path[512];
     struct stat st;
 
-    snprintf(cgroup_path, sizeof(cgroup_path), "%s_pid_%d", CGROUP_PATH, pid);
+    snprintf(cgroup_path, sizeof(cgroup_path), "%s/%d", CGROUP_PATH, pid);
 
     if (stat(cgroup_path, &st) != 0) {
         return 0;
@@ -254,7 +305,7 @@ int unregister_rate_limiter_by_pid(pid_t pid) {
     char cgroup_path[512];
     struct stat st;
 
-    snprintf(cgroup_path, sizeof(cgroup_path), "%s_pid_%d", CGROUP_PATH, pid);
+    snprintf(cgroup_path, sizeof(cgroup_path), "%s/%d", CGROUP_PATH, pid);
 
     if (stat(cgroup_path, &st) != 0) {
         return -1;
