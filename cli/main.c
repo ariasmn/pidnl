@@ -1,7 +1,5 @@
 #include "discovery.h"
 #include "ratelimit.h"
-#include <getopt.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
