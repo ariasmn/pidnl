@@ -12,18 +12,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define PID_STR_MAX 8
-
 #ifndef BPF_OBJECT_PATH
 #define BPF_OBJECT_PATH "lib/src/ratelimit.bpf.o"
 #endif
 
+#define PID_STR_MAX 8
 #define CGROUP_PARENT "strait"
 #define CGROUP_ROOT "/sys/fs/cgroup"
 #define CGROUP_PATH CGROUP_ROOT "/" CGROUP_PARENT
 
-#define DIRECTION_UPLOAD 0
-#define DIRECTION_DOWNLOAD 1
+static const unsigned int DIRECTION_UPLOAD = 0;
+static const unsigned int DIRECTION_DOWNLOAD = 1;
 
 struct rate_limiter {
     char cgroup_path[PATH_MAX];
@@ -121,22 +120,15 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     download_bps = (__u64)config.download_kbps * 1000 / 8;
 
     err = bpf_map_update_elem(
-        rate_limits_map_fd, &(unsigned int){DIRECTION_UPLOAD}, &upload_bps, 0
+        rate_limits_map_fd, &DIRECTION_UPLOAD, &upload_bps, 0
     );
     if (err) {
-        err = bpf_map_update_elem(
-            rate_limits_map_fd, &(unsigned int){DIRECTION_DOWNLOAD},
-            &download_bps, 0
-        );
-        if (err) {
-            bpf_object__close(obj);
-            return RATELIMIT_BPF_MAP_UPDATE;
-        }
+        bpf_object__close(obj);
+        return RATELIMIT_BPF_MAP_UPDATE;
     }
 
     err = bpf_map_update_elem(
-        rate_limits_map_fd, &(unsigned int){DIRECTION_DOWNLOAD}, &download_bps,
-        0
+        rate_limits_map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0
     );
     if (err) {
         bpf_object__close(obj);
