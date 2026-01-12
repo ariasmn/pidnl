@@ -5,6 +5,15 @@
 #include <linux/taskstats.h>
 #include <sys/types.h>
 
+typedef enum {
+    DISCOVERY_OK = 0,
+    DISCOVERY_ALLOC,
+    DISCOVERY_SOCKET,
+    DISCOVERY_BIND,
+    DISCOVERY_RECVMSG,
+    DISCOVERY_NETLINK_MSG
+} discovery_code;
+
 typedef struct {
     pid_t pid;
     char process_name[TS_COMM_LEN];
@@ -20,8 +29,10 @@ typedef struct {
     size_t capacity;
 } process_list;
 
-process_list *get_network_processes(void);
+discovery_code get_network_processes(process_list **out_list);
 
 void destroy_process_list(process_list *list);
+
+const char *discovery_code_string(discovery_code code);
 
 #endif
