@@ -175,7 +175,6 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
     };
 
     if (sendmsg(fd, &msg, 0) < 0) {
-        perror("sendmsg");
         return -1;
     }
 
@@ -190,7 +189,6 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
             if (errno == EINTR) {
                 continue;
             }
-            perror("recvmsg");
             return -1;
         }
         if (ret == 0)
@@ -202,8 +200,6 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
                 return 0;
             }
             if (h->nlmsg_type == NLMSG_ERROR) {
-                struct nlmsgerr *err = NLMSG_DATA(h);
-                fprintf(stderr, "Netlink error: %s\n", strerror(-err->error));
                 return -1;
             }
             if (h->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
@@ -211,7 +207,9 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
                 if (diag->idiag_uid == 0 || diag->idiag_uid >= 1000) {
                     pid_t pid = find_pid_by_inode(diag->idiag_inode);
                     if (pid > 0) {
-                        add_process_list(list, pid, protocol == IPPROTO_TCP);
+                        if (add_process_list(list, pid, protocol == IPPROTO_TCP) != 0) {
+                            return -1;
+                        }
                     }
                 }
             }
@@ -220,33 +218,46 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
     }
 }
 
-process_list *get_network_processes(void) {
+discovery_code get_network_processes(process_list **out_list) {
     int fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_SOCK_DIAG);
     if (fd < 0) {
-        perror("socket(AF_NETLINK)");
-        return NULL;
+        return DISCOVERY_SOCKET;
     }
 
     struct sockaddr_nl nladdr = {.nl_family = AF_NETLINK};
     if (bind(fd, (struct sockaddr *)&nladdr, sizeof(nladdr)) < 0) {
-        perror("bind(AF_NETLINK)");
         close(fd);
-        return NULL;
+        return DISCOVERY_BIND;
     }
 
-    process_list *list = create_process_list();
-    if (!list) {
+    *out_list = create_process_list();
+    if (!*out_list) {
         close(fd);
-        return NULL;
+        return DISCOVERY_ALLOC;
     }
-
-    query_sockets(fd, AF_INET, IPPROTO_TCP, list);
-    query_sockets(fd, AF_INET6, IPPROTO_TCP, list);
-    query_sockets(fd, AF_INET, IPPROTO_UDP, list);
-    query_sockets(fd, AF_INET6, IPPROTO_UDP, list);
-
+    if (query_sockets(fd, AF_INET, IPPROTO_TCP, *out_list) != 0) {
+        destroy_process_list(*out_list);
+        close(fd);
+        return DISCOVERY_RECVMSG;
+    }
+    if (query_sockets(fd, AF_INET6, IPPROTO_TCP, *out_list) != 0) {
+        destroy_process_list(*out_list);
+        close(fd);
+        return DISCOVERY_RECVMSG;
+    }
+    if (query_sockets(fd, AF_INET, IPPROTO_UDP, *out_list) != 0) {
+        destroy_process_list(*out_list);
+        close(fd);
+        return DISCOVERY_RECVMSG;
+    }
+    if (query_sockets(fd, AF_INET6, IPPROTO_UDP, *out_list) != 0) {
+        destroy_process_list(*out_list);
+        close(fd);
+        return DISCOVERY_RECVMSG;
+    }
     close(fd);
-    return list;
+
+    return DISCOVERY_OK;
 }
 
 void destroy_process_list(process_list *list) {
@@ -254,4 +265,23 @@ void destroy_process_list(process_list *list) {
         return;
     free(list->processes);
     free(list);
+}
+
+const char *discovery_code_string(discovery_code code) {
+    switch (code) {
+    case DISCOVERY_OK:
+        return "Success";
+    case DISCOVERY_ALLOC:
+        return "Failed to allocate memory";
+    case DISCOVERY_SOCKET:
+        return "Failed to create netlink socket";
+    case DISCOVERY_BIND:
+        return "Failed to bind netlink socket";
+    case DISCOVERY_RECVMSG:
+        return "Failed to receive netlink messages";
+    case DISCOVERY_NETLINK_MSG:
+        return "Netlink error received";
+    default:
+        return "Unknown error";
+    }
 }

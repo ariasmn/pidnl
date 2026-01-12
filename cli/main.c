@@ -56,9 +56,13 @@ static void cmd_list(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
-    process_list *list = get_network_processes();
-    if (!list) {
-        fprintf(stderr, "Failed to discover processes\n");
+    process_list *list;
+    discovery_code err = get_network_processes(&list);
+    if (err != DISCOVERY_OK) {
+        fprintf(
+            stderr, "%s: %s: %s\n", PROGRAM_NAME,
+            "Failed to discover processes", discovery_code_string(err)
+        );
         exit(EXIT_FAILURE);
     }
 
@@ -102,13 +106,16 @@ static void cmd_limit_set(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    rate_limit_config_t config = {
+    rate_limit_config config = {
         .upload_kbps = upload_kbps, .download_kbps = download_kbps
     };
 
-    rate_limiter *limiter = limit_process_bandwidth(pid, config);
-    if (!limiter) {
-        fprintf(stderr, "%s: failed to limit bandwidth\n", PROGRAM_NAME);
+    ratelimit_code err = limit_process_bandwidth(pid, config);
+    if (err != RATELIMIT_OK) {
+        fprintf(
+            stderr, "%s: %s: %s\n", PROGRAM_NAME, "Failed to limit bandwidth",
+            ratelimit_code_string(err)
+        );
         exit(EXIT_FAILURE);
     }
 
@@ -117,8 +124,6 @@ static void cmd_limit_set(int argc, char *argv[]) {
         printf(", %u kbps download", download_kbps);
     }
     printf("\n");
-
-    close_rate_limiter_handle(limiter);
 }
 
 static void cmd_limit_unset(int argc, char *argv[]) {
@@ -152,11 +157,9 @@ static void cmd_limit_unset(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    int err = unregister_rate_limiter_by_pid(pid);
-    if (err) {
-        fprintf(
-            stderr, "%s: no rate limit set for PID %d\n", PROGRAM_NAME, pid
-        );
+    ratelimit_code err = unregister_rate_limiter_by_pid(pid);
+    if (err != RATELIMIT_OK) {
+        fprintf(stderr, "%s: %s\n", PROGRAM_NAME, ratelimit_code_string(err));
         exit(EXIT_FAILURE);
     }
 
