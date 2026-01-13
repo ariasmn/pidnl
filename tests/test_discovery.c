@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/sock_diag.h>
@@ -15,8 +16,6 @@
 #include <errno.h>
 
 #include "discovery.h"
-
-/* Mock wrappers */
 
 int __wrap_socket(int domain, int type, int protocol) {
     check_expected(domain);
@@ -44,57 +43,41 @@ ssize_t __wrap_sendmsg(int sockfd, const struct msghdr *msg, int flags) {
     return (ssize_t)mock();
 }
 
-/* Global to control recvmsg behavior */
-static int recvmsg_call_count = 0;
-
 ssize_t __wrap_recvmsg(int sockfd, struct msghdr *msg, int flags) {
     (void)flags;
     check_expected(sockfd);
 
-    recvmsg_call_count++;
+    unsigned int inode = (unsigned int)mock();
 
-    int behavior = (int)mock();
-
-    if (behavior == -1) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    if (behavior == 0) {
-        return 0;
-    }
-
-    char *buf = (char *)msg->msg_iov->iov_base;
-
-    /* First call: return actual diagnostic message */
-    if (recvmsg_call_count == 1) {
+    if (inode == 0) {
+        char *buf = (char *)msg->msg_iov->iov_base;
         struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-        struct inet_diag_msg *diag = (struct inet_diag_msg *)NLMSG_DATA(nlh);
-
-        nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct inet_diag_msg));
-        nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
-        nlh->nlmsg_flags = NLM_F_MULTI;
+        nlh->nlmsg_len = NLMSG_LENGTH(0);
+        nlh->nlmsg_type = NLMSG_DONE;
+        nlh->nlmsg_flags = 0;
         nlh->nlmsg_seq = 0;
         nlh->nlmsg_pid = 0;
-
-        memset(diag, 0, sizeof(struct inet_diag_msg));
-        diag->idiag_family = AF_INET;
-        diag->idiag_state = 0x01;  /* TCP_ESTABLISHED */
-        diag->idiag_uid = 1000;    /* Non-root user */
-        diag->idiag_inode = 12345; /* Test inode */
-
-        return nlh->nlmsg_len;
+        return sizeof(struct nlmsghdr);
     }
 
-    /* Second call: return DONE */
+    /* Construct diagnostic message with specified inode */
+    char *buf = (char *)msg->msg_iov->iov_base;
     struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-    nlh->nlmsg_len = NLMSG_LENGTH(0);
-    nlh->nlmsg_type = NLMSG_DONE;
-    nlh->nlmsg_flags = 0;
+    struct inet_diag_msg *diag = (struct inet_diag_msg *)NLMSG_DATA(nlh);
+
+    nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct inet_diag_msg));
+    nlh->nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    nlh->nlmsg_flags = NLM_F_MULTI;
     nlh->nlmsg_seq = 0;
     nlh->nlmsg_pid = 0;
 
-    return sizeof(struct nlmsghdr);
+    memset(diag, 0, sizeof(struct inet_diag_msg));
+    diag->idiag_family = AF_INET;
+    diag->idiag_state = 0x01;
+    diag->idiag_uid = 1000;
+    diag->idiag_inode = inode;
+
+    return nlh->nlmsg_len;
 }
 
 /* Mock dirent structures */
@@ -166,7 +149,6 @@ int __wrap_fclose(FILE *stream) {
     return (int)mock();
 }
 
-/* Test: Find a process with matching inode */
 static void test_get_network_processes_finds_process(void **state) {
     (void)state;
 
@@ -186,7 +168,7 @@ static void test_get_network_processes_finds_process(void **state) {
 
     /* First recvmsg returns diagnostic message with inode 12345 */
     expect_value(__wrap_recvmsg, sockfd, 3);
-    will_return(__wrap_recvmsg, 1); /* Return diagnostic message */
+    will_return(__wrap_recvmsg, 12345); /* inode > 0 means diagnostic */
 
     /* Now find_pid_by_inode is called - scan /proc */
     expect_string(__wrap_opendir, name, "/proc");
@@ -209,7 +191,7 @@ static void test_get_network_processes_finds_process(void **state) {
     will_return(__wrap_readlink, 15);
     will_return(__wrap_readlink, "socket:[12345]");
 
-    /* Found it! Close fd dir */
+    /* Close fd dir */
     expect_value(__wrap_closedir, dirp, (DIR *)0x2000);
     will_return(__wrap_closedir, 0);
 
@@ -233,17 +215,11 @@ static void test_get_network_processes_finds_process(void **state) {
     will_return(__wrap_readlink, 9);
     will_return(__wrap_readlink, "/bin/test");
 
-    /* Second recvmsg returns DONE */
-    expect_value(__wrap_recvmsg, sockfd, 3);
-    will_return(__wrap_recvmsg, 0); /* DONE */
-
-    /* === Query TCP IPv6 === */
-    expect_value(__wrap_sendmsg, sockfd, 3);
-    will_return(__wrap_sendmsg, 32);
+    /* Second recvmsg returns DONE (inode 0) */
     expect_value(__wrap_recvmsg, sockfd, 3);
     will_return(__wrap_recvmsg, 0);
 
-    /* === Query UDP IPv4 === */
+    /* === Query TCP IPv6 === */
     expect_value(__wrap_sendmsg, sockfd, 3);
     will_return(__wrap_sendmsg, 32);
     expect_value(__wrap_recvmsg, sockfd, 3);
@@ -252,6 +228,43 @@ static void test_get_network_processes_finds_process(void **state) {
     /* === Query UDP IPv6 === */
     expect_value(__wrap_sendmsg, sockfd, 3);
     will_return(__wrap_sendmsg, 32);
+    expect_value(__wrap_recvmsg, sockfd, 3);
+    will_return(__wrap_recvmsg, 0);
+
+    /* === Query UDP IPv4 === */
+    expect_value(__wrap_sendmsg, sockfd, 3);
+    will_return(__wrap_sendmsg, 32);
+
+    /* UDP returns diagnostic message with inode 54321 for same PID 1234 */
+    expect_value(__wrap_recvmsg, sockfd, 3);
+    will_return(__wrap_recvmsg, 54321);
+
+    /* find_pid_by_inode for inode 54321 - scan /proc again */
+    expect_string(__wrap_opendir, name, "/proc");
+    will_return(__wrap_opendir, (DIR *)0x1100);
+
+    expect_value(__wrap_readdir, dirp, (DIR *)0x1100);
+    will_return(__wrap_readdir, &proc_entry_1234);
+
+    expect_string(__wrap_opendir, name, "/proc/1234/fd");
+    will_return(__wrap_opendir, (DIR *)0x2100);
+
+    expect_value(__wrap_readdir, dirp, (DIR *)0x2100);
+    will_return(__wrap_readdir, &fd_entry_3);
+
+    expect_string(__wrap_readlink, pathname, "/proc/1234/fd/3");
+    will_return(__wrap_readlink, 15);
+    will_return(__wrap_readlink, "socket:[54321]");
+
+    expect_value(__wrap_closedir, dirp, (DIR *)0x2100);
+    will_return(__wrap_closedir, 0);
+
+    expect_value(__wrap_closedir, dirp, (DIR *)0x1100);
+    will_return(__wrap_closedir, 0);
+
+    /* No file reads needed - process already known */
+
+    /* UDP IPv4 DONE */
     expect_value(__wrap_recvmsg, sockfd, 3);
     will_return(__wrap_recvmsg, 0);
 
@@ -268,15 +281,46 @@ static void test_get_network_processes_finds_process(void **state) {
     assert_string_equal(list->processes[0].process_name, "testprocess");
     assert_string_equal(list->processes[0].exe_path, "/bin/test");
     assert_int_equal(list->processes[0].has_tcp, 1);
-    assert_int_equal(list->processes[0].has_udp, 0);
-    assert_int_equal(list->processes[0].num_connections, 1);
+    assert_int_equal(list->processes[0].has_udp, 1);
+    assert_int_equal(list->processes[0].num_connections, 2);
 
     destroy_process_list(list);
 }
 
+static void test_discovery_code_string(void **state) {
+    (void)state;
+
+    assert_string_equal(discovery_code_string(DISCOVERY_OK), "Success");
+    assert_string_equal(
+        discovery_code_string(DISCOVERY_ALLOC), "Failed to allocate memory"
+    );
+    assert_string_equal(
+        discovery_code_string(DISCOVERY_SOCKET),
+        "Failed to create netlink socket"
+    );
+    assert_string_equal(
+        discovery_code_string(DISCOVERY_BIND), "Failed to bind netlink socket"
+    );
+    assert_string_equal(
+        discovery_code_string(DISCOVERY_RECVMSG),
+        "Failed to receive netlink messages"
+    );
+    assert_string_equal(
+        discovery_code_string(DISCOVERY_NETLINK_MSG), "Netlink error received"
+    );
+    assert_string_equal(discovery_code_string(99), "Unknown error");
+}
+
+static void test_destroy_process_list_null(void **state) {
+    (void)state;
+    destroy_process_list(NULL);
+}
+
 int main(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_get_network_processes_finds_process)
+        cmocka_unit_test(test_get_network_processes_finds_process),
+        cmocka_unit_test(test_destroy_process_list_null),
+        cmocka_unit_test(test_discovery_code_string),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
