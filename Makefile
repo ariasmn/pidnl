@@ -30,26 +30,28 @@ $(LIBSRC)/%.o: $(LIBSRC)/%.c
 cli/%.o: cli/%.c
 	$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
 
-clean:
-	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL)
-
 # Test configuration
 TEST_SRC = tests/test_discovery.c
 TEST_BIN = tests/test_discovery
 TEST_OBJ = tests/discovery_test.o
-TEST_CFLAGS = -Wall -Wextra -Werror -g -fPIE
+TEST_CFLAGS = -Wall -Wextra -Werror -g -fPIE -I$(LIBSRC)
 
-$(TEST_OBJ): $(LIBSRC)/discovery.c
+$(TEST_OBJ): $(LIBSRC)/discovery.c $(LIBSRC)/discovery.h
 	@mkdir -p tests
 	$(CC) $(TEST_CFLAGS) -I. -c $< -o $@
 
 test-build: $(TEST_OBJ)
-	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) -pie
+	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) \
+		-Wl,--wrap=socket -Wl,--wrap=bind -Wl,--wrap=close -Wl,--wrap=sendmsg \
+		-Wl,--wrap=recvmsg -Wl,--wrap=opendir -Wl,--wrap=readdir -Wl,--wrap=closedir \
+		-Wl,--wrap=readlink -Wl,--wrap=fopen -Wl,--wrap=fgets -Wl,--wrap=fclose \
+		-lcmocka -pie
 
-CONTAINER_ENGINE ?= $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
+test: test-build
+	./tests/test_discovery
+	rm -f $(TEST_BIN) $(TEST_OBJ)
 
-test:
-	@$(CONTAINER_ENGINE) build --quiet -f tests/Dockerfile -t strait-test . >/dev/null 2>&1
-	@$(CONTAINER_ENGINE) run --rm --cap-add=NET_ADMIN strait-test
+clean:
+	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL) $(TEST_OBJ) $(TEST_BIN)
 
 .PHONY: all clean check-asan test test-build
