@@ -4,3 +4,4 @@
 *.la
 cli/strait
 gui/strait-gui
+lib/tests/test_discovery
