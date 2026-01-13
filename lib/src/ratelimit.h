@@ -14,9 +14,6 @@ typedef enum {
     RATELIMIT_WRITE_PID,
     RATELIMIT_BPF_OPEN,
     RATELIMIT_BPF_LOAD,
-    RATELIMIT_BPF_PROG_NOT_FOUND,
-    RATELIMIT_BPF_MAP_NOT_FOUND,
-    RATELIMIT_BPF_MAP_UPDATE,
     RATELIMIT_BPF_ATTACH,
     RATELIMIT_CGROUP_NOT_FOUND,
     RATELIMIT_SETUP_CGROUP,
@@ -30,7 +27,7 @@ typedef struct {
 
 typedef struct {
     char cgroup_path[PATH_MAX];
-    struct bpf_object *bpf_obj;
+    struct ratelimit_bpf *skel;
     int cgroup_fd;
 } rate_limiter;
 
