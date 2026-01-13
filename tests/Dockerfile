@@ -4,8 +4,7 @@ RUN apk add --no-cache \
     clang \
     musl-dev \
     linux-headers \
-    make \
-    cmocka-dev
+    make
 
 WORKDIR /app
 COPY . .

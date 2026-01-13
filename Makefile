@@ -40,12 +40,12 @@ $(TEST_OBJ): $(LIBSRC)/discovery.c
 	$(CC) $(TEST_CFLAGS) -I. -c $< -o $@
 
 test-build: $(TEST_OBJ)
-	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) -lcmocka -pie
+	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) -pie
 
 CONTAINER_ENGINE ?= $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 
 test:
-	@$(CONTAINER_ENGINE) build -q -f tests/Dockerfile -t strait-test .
+	@$(CONTAINER_ENGINE) build --quiet -f tests/Dockerfile -t strait-test . >/dev/null 2>&1
 	@$(CONTAINER_ENGINE) run --rm --cap-add=NET_ADMIN strait-test
 
 .PHONY: all clean check-asan test test-build
