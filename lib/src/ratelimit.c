@@ -1,4 +1,5 @@
 #include "ratelimit.h"
+#include "ratelimit_bpf.skel.h"
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
@@ -12,10 +13,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifndef BPF_OBJECT_PATH
-#define BPF_OBJECT_PATH "lib/src/ratelimit.bpf.o"
-#endif
-
 #define PID_STR_MAX 8
 #define CGROUP_PARENT "strait"
 #define CGROUP_ROOT "/sys/fs/cgroup"
@@ -26,7 +23,7 @@ static const unsigned int DIRECTION_DOWNLOAD = 1;
 
 struct rate_limiter {
     char cgroup_path[PATH_MAX];
-    struct bpf_object *bpf_obj;
+    struct ratelimit_bpf *skel;
     int cgroup_fd;
 };
 
@@ -81,40 +78,24 @@ setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
 
 static ratelimit_code
 attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
-    struct bpf_object *obj;
-    struct bpf_program *egress_prog, *ingress_prog;
-    struct bpf_map *rate_limits_map;
-    int egress_fd, ingress_fd;
+    struct ratelimit_bpf *skel;
+    int rate_limits_map_fd;
     int cgroup_fd;
     int err;
     __u64 upload_bps, download_bps;
 
-    obj = bpf_object__open_file(BPF_OBJECT_PATH, NULL);
-    if (libbpf_get_error(obj)) {
+    skel = ratelimit_bpf__open();
+    if (!skel) {
         return RATELIMIT_BPF_OPEN;
     }
 
-    err = bpf_object__load(obj);
+    err = ratelimit_bpf__load(skel);
     if (err) {
-        bpf_object__close(obj);
+        ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_LOAD;
     }
 
-    egress_prog = bpf_object__find_program_by_name(obj, "egress_rate_limit");
-    ingress_prog = bpf_object__find_program_by_name(obj, "ingress_rate_limit");
-
-    if (!egress_prog || !ingress_prog) {
-        bpf_object__close(obj);
-        return RATELIMIT_BPF_PROG_NOT_FOUND;
-    }
-
-    rate_limits_map = bpf_object__find_map_by_name(obj, "rate_limits");
-    if (!rate_limits_map) {
-        bpf_object__close(obj);
-        return RATELIMIT_BPF_MAP_NOT_FOUND;
-    }
-
-    int rate_limits_map_fd = bpf_map__fd(rate_limits_map);
+    rate_limits_map_fd = bpf_map__fd(skel->maps.rate_limits);
 
     upload_bps = (__u64)config.upload_kbps * 1000 / 8;
     download_bps = (__u64)config.download_kbps * 1000 / 8;
@@ -123,43 +104,46 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
         rate_limits_map_fd, &DIRECTION_UPLOAD, &upload_bps, 0
     );
     if (err) {
-        bpf_object__close(obj);
-        return RATELIMIT_BPF_MAP_UPDATE;
+        ratelimit_bpf__destroy(skel);
+        return RATELIMIT_BPF_LOAD;
     }
 
     err = bpf_map_update_elem(
         rate_limits_map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0
     );
     if (err) {
-        bpf_object__close(obj);
-        return RATELIMIT_BPF_MAP_UPDATE;
+        ratelimit_bpf__destroy(skel);
+        return RATELIMIT_BPF_LOAD;
     }
-
-    egress_fd = bpf_program__fd(egress_prog);
-    ingress_fd = bpf_program__fd(ingress_prog);
 
     cgroup_fd = open(limiter->cgroup_path, O_RDONLY);
     if (cgroup_fd < 0) {
-        bpf_object__close(obj);
+        ratelimit_bpf__destroy(skel);
         return RATELIMIT_OPEN_CGROUP;
     }
 
-    err = bpf_prog_attach(egress_fd, cgroup_fd, BPF_CGROUP_INET_EGRESS, 0);
+    err = bpf_prog_attach(
+        bpf_program__fd(skel->progs.egress_rate_limit), cgroup_fd,
+        BPF_CGROUP_INET_EGRESS, 0
+    );
     if (err) {
         close(cgroup_fd);
-        bpf_object__close(obj);
+        ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_ATTACH;
     }
 
-    err = bpf_prog_attach(ingress_fd, cgroup_fd, BPF_CGROUP_INET_INGRESS, 0);
+    err = bpf_prog_attach(
+        bpf_program__fd(skel->progs.ingress_rate_limit), cgroup_fd,
+        BPF_CGROUP_INET_INGRESS, 0
+    );
     if (err) {
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
         close(cgroup_fd);
-        bpf_object__close(obj);
+        ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_ATTACH;
     }
 
-    limiter->bpf_obj = obj;
+    limiter->skel = skel;
     limiter->cgroup_fd = cgroup_fd;
 
     return RATELIMIT_OK;
@@ -261,8 +245,8 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
     if (!limiter)
         return;
 
-    if (limiter->bpf_obj) {
-        bpf_object__close(limiter->bpf_obj);
+    if (limiter->skel) {
+        ratelimit_bpf__destroy(limiter->skel);
     }
 
     free(limiter);
@@ -308,12 +292,6 @@ const char *ratelimit_code_string(ratelimit_code code) {
         return "Failed to open BPF object";
     case RATELIMIT_BPF_LOAD:
         return "Failed to load BPF object";
-    case RATELIMIT_BPF_PROG_NOT_FOUND:
-        return "Failed to find eBPF programs";
-    case RATELIMIT_BPF_MAP_NOT_FOUND:
-        return "Failed to find rate_limits map";
-    case RATELIMIT_BPF_MAP_UPDATE:
-        return "Failed to update rate limits map";
     case RATELIMIT_BPF_ATTACH:
         return "Failed to attach eBPF programs";
     case RATELIMIT_CGROUP_NOT_FOUND:
