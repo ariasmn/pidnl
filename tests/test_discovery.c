@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../src/discovery.h"
+#include "lib/src/discovery.h"
 
 static void test_discovery_code_string_valid_codes(void **state) {
     (void)state;

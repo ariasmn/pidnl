@@ -11,4 +11,4 @@ WORKDIR /app
 COPY . .
 RUN make test-build
 
-CMD ["./lib/tests/test_discovery"]
+CMD ["./tests/test_discovery"]

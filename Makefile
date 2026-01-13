@@ -30,22 +30,22 @@ clean:
 	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(TEST_BIN) $(TEST_OBJ)
 
 # Test configuration
-TEST_SRC = lib/tests/test_discovery.c
-TEST_BIN = lib/tests/test_discovery
-TEST_OBJ = lib/tests/discovery_test.o
-TEST_CFLAGS = -Wall -Wextra -Werror -g
+TEST_SRC = tests/test_discovery.c
+TEST_BIN = tests/test_discovery
+TEST_OBJ = tests/discovery_test.o
+TEST_CFLAGS = -Wall -Wextra -Werror -g -fPIE
 
 $(TEST_OBJ): $(LIBSRC)/discovery.c
-	@mkdir -p lib/tests
-	$(CC) $(TEST_CFLAGS) -c $< -o $@
+	@mkdir -p tests
+	$(CC) $(TEST_CFLAGS) -I. -c $< -o $@
 
 test-build: $(TEST_OBJ)
-	$(CC) $(TEST_CFLAGS) $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) -lcmocka
+	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) -lcmocka -pie
 
 CONTAINER_ENGINE ?= $(shell command -v docker 2>/dev/null || command -v podman 2>/dev/null)
 
 test:
-	@$(CONTAINER_ENGINE) build -q -f Dockerfile.test -t strait-test .
+	@$(CONTAINER_ENGINE) build -q -f tests/Dockerfile -t strait-test .
 	@$(CONTAINER_ENGINE) run --rm --cap-add=NET_ADMIN strait-test
 
 .PHONY: all clean check-asan test test-build
