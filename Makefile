@@ -9,26 +9,31 @@ BPF_SRC = lib/src/ratelimit.bpf.c
 BPF_OBJ = $(LIBSRC)/ratelimit.bpf.o
 BPF_SKEL = $(LIBSRC)/ratelimit_bpf.skel.h
 
-all: check-asan $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
+check-deps:
+	@which clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
+	@which bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
+	@ldconfig -p 2>/dev/null | grep -q libasan.so || (echo "libasan: MISSING" && exit 1)
+	@pkg-config --exists cmocka 2>/dev/null || (echo "libcmocka: MISSING" && exit 1)
+	@ldconfig -p 2>/dev/null | grep -q libnl-3.so || (echo "libnl-3: MISSING" && exit 1)
+	@ldconfig -p 2>/dev/null | grep -q libnl-route-3.so || (echo "libnl-route-3: MISSING" && exit 1)
+	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
+	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
 
-check-asan:
-	@echo "int main(void){return 0;}" | $(CC) -fsanitize=address -x c - -o /dev/null 2>/dev/null || \
-		(echo "Error: libasan not found" && exit 1)
-
+dev: check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 $(BPF_SKEL): $(BPF_OBJ)
-	bpftool gen skeleton $< > $@
+	@bpftool gen skeleton $< > $@
 
 $(BPF_OBJ): $(BPF_SRC)
-	$(CC) -O2 -target bpf -g -c $< -o $@
+	@$(CC) -O2 -target bpf -g -c $< -o $@
 
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(CLI_OBJ)
-	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lz
+	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 cli/%.o: cli/%.c
-	$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
+	@$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
 
 TEST_SRC = tests/test_discovery.c
 TEST_BIN = tests/test_discovery
@@ -66,4 +71,7 @@ test: $(BPF_SKEL)
 clean:
 	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL) $(TEST_OBJ) $(TEST_BIN) $(TEST_RATELIMIT_OBJ) $(TEST_RATELIMIT_BIN)
 
-.PHONY: all clean check-asan test
+lint:
+	clang-format --dry-run --Werror cli/*.c lib/src/*.c tests/*.c
+
+.PHONY: dev clean check-deps test lint
