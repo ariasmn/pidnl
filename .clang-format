@@ -4,3 +4,4 @@ TabWidth: 4
 UseTab: Never
 AlignAfterOpenBracket: BlockIndent
 SpacesBeforeTrailingComments: 1
+SortIncludes: Never

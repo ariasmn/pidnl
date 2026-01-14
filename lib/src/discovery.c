@@ -261,8 +261,9 @@ discovery_code get_network_processes(process_list **out_list) {
 }
 
 void destroy_process_list(process_list *list) {
-    if (!list)
+    if (!list) {
         return;
+    }
     free(list->processes);
     free(list);
 }
