@@ -3,6 +3,7 @@
 #include <setjmp.h>
 #include <cmocka.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <linux/limits.h>
@@ -28,6 +29,8 @@ int __wrap_bpf_object__load_skeleton(struct bpf_object_skeleton *s) {
 void __wrap_bpf_object__destroy_skeleton(struct bpf_object_skeleton *s) {
     (void)s;
 }
+
+void __wrap_ratelimit_bpf__destroy(struct ratelimit_bpf *skel) { (void)skel; }
 
 int __wrap_bpf_map__fd(const struct bpf_map *map) {
     (void)map;
@@ -198,6 +201,73 @@ static void test_limit_process_bandwidth(void **state) {
     assert_int_equal(result, RATELIMIT_OK);
 }
 
+
+static void test_close_rate_limiter_handle_valid(void **state) {
+    (void)state;
+
+    rate_limiter *handle = malloc(sizeof(rate_limiter));
+    assert_non_null(handle);
+
+    memset(handle, 0, sizeof(rate_limiter));
+
+    close_rate_limiter_handle(handle);
+}
+
+static void test_unregister_rate_limiter_by_pid_success(void **state) {
+    (void)state;
+
+    pid_t test_pid = 5678;
+
+    expect_string(__wrap_stat, pathname, "/sys/fs/cgroup/strait/5678");
+    will_return(__wrap_stat, 0);
+
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/5678");
+    will_return(__wrap_open, 30);
+
+    expect_value(__wrap_bpf_prog_detach, target_fd, 30);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+
+    expect_value(__wrap_bpf_prog_detach, target_fd, 30);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+
+    expect_value(__wrap_close, fd, 30);
+    will_return(__wrap_close, 0);
+
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/cgroup.procs");
+    will_return(__wrap_open, 40);
+
+    expect_value(__wrap_write, fd, 40);
+    expect_string(__wrap_write, buf, "5678");
+    will_return(__wrap_write, 4);
+
+    expect_value(__wrap_close, fd, 40);
+    will_return(__wrap_close, 0);
+
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/5678");
+    will_return(__wrap_open, 50);
+
+    expect_value(__wrap_fdopendir, fd, 50);
+    will_return(__wrap_fdopendir, (DIR *)0x1000);
+
+    expect_value(__wrap_readdir, dirp, (DIR *)0x1000);
+    will_return(__wrap_readdir, (struct dirent *)NULL);
+
+    expect_value(__wrap_closedir, dirp, (DIR *)0x1000);
+    will_return(__wrap_closedir, 0);
+
+    expect_value(__wrap_close, fd, 50);
+    will_return(__wrap_close, 0);
+
+    expect_string(__wrap_rmdir, pathname, "/sys/fs/cgroup/strait/5678");
+    will_return(__wrap_rmdir, 0);
+
+    ratelimit_code result = unregister_rate_limiter_by_pid(test_pid);
+
+    assert_int_equal(result, RATELIMIT_OK);
+}
+
 static void test_ratelimit_code_string(void **state) {
     (void)state;
 
@@ -213,6 +283,8 @@ static void test_ratelimit_code_string(void **state) {
 int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_limit_process_bandwidth),
+        cmocka_unit_test(test_close_rate_limiter_handle_valid),
+        cmocka_unit_test(test_unregister_rate_limiter_by_pid_success),
         cmocka_unit_test(test_ratelimit_code_string),
     };
 

@@ -58,6 +58,7 @@ test: $(BPF_SKEL)
 		-Wl,--wrap=bpf_object__destroy_skeleton \
 		-Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
 		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach -Wl,--wrap=unlinkat \
+		-Wl,--wrap=ratelimit_bpf__destroy \
 		-lcmocka -lbpf -pie; \
 	./tests/test_discovery; \
 	./tests/test_ratelimit
