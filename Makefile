@@ -18,6 +18,7 @@ check-deps:
 	@ldconfig -p 2>/dev/null | grep -q libnl-route-3.so || (echo "libnl-route-3: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
+	@which valgrind >/dev/null 2>&1 || (echo "valgrind: MISSING" && exit 1)
 
 dev: check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 $(BPF_SKEL): $(BPF_OBJ)
@@ -65,8 +66,10 @@ test: $(BPF_SKEL)
 		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach -Wl,--wrap=unlinkat \
 		-Wl,--wrap=ratelimit_bpf__destroy \
 		-lcmocka -lbpf -pie; \
-	./tests/test_discovery; \
-	./tests/test_ratelimit
+	valgrind -s -q --leak-check=full --show-leak-kinds=all \
+		--errors-for-leak-kinds=none --error-exitcode=1 ./tests/test_discovery; \
+	valgrind -s -q --leak-check=full --show-leak-kinds=all \
+		--errors-for-leak-kinds=none --error-exitcode=1 ./tests/test_ratelimit
 
 clean:
 	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL) $(TEST_OBJ) $(TEST_BIN) $(TEST_RATELIMIT_OBJ) $(TEST_RATELIMIT_BIN)
