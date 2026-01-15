@@ -26,6 +26,8 @@ typedef struct {
 
 typedef struct rate_limiter rate_limiter;
 
+ratelimit_code ratelimit_init(void);
+
 ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config);
 
 void close_rate_limiter_handle(rate_limiter *handle);

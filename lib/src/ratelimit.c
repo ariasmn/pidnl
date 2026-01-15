@@ -3,11 +3,11 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
-#include <mntent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
 #include <linux/limits.h>
+#include <mntent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,19 +23,6 @@ struct rate_limiter {
     struct ratelimit_bpf *skel;
     int cgroup_fd;
 };
-
-static int libcg_initialized = 0;
-
-static ratelimit_code ensure_libcgroup_init(void) {
-    if (libcg_initialized) {
-        return RATELIMIT_OK;
-    }
-    if (cgroup_init() != 0) {
-        return RATELIMIT_LIBCG_INIT;
-    }
-    libcg_initialized = 1;
-    return RATELIMIT_OK;
-}
 
 static int open_cgroup_fd(const char *name) {
     char path[PATH_MAX];
@@ -151,6 +138,13 @@ static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
     snprintf(buf, size, "%s/%d", CGROUP_NAME, pid);
 }
 
+ratelimit_code ratelimit_init(void) {
+    if (cgroup_init() != 0) {
+        return RATELIMIT_LIBCG_INIT;
+    }
+    return RATELIMIT_OK;
+}
+
 ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     rate_limiter *limiter;
     struct cgroup *parent = NULL, *child = NULL;
@@ -160,11 +154,6 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
 
     if (pid <= 0) {
         return RATELIMIT_INVALID_PID;
-    }
-
-    err = ensure_libcgroup_init();
-    if (err != RATELIMIT_OK) {
-        return err;
     }
 
     err = create_cgroup(CGROUP_NAME, &parent);
@@ -233,13 +222,7 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
 ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
     struct cgroup *cg = NULL;
     int cgroup_fd;
-    ratelimit_code err;
     char name[64];
-
-    err = ensure_libcgroup_init();
-    if (err != RATELIMIT_OK) {
-        return err;
-    }
 
     build_cgroup_name(pid, name, sizeof(name));
 
