@@ -28,7 +28,7 @@ $(BPF_OBJ): $(BPF_SRC)
 	@$(CC) -O2 -target bpf -g -c $< -o $@
 
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(CLI_OBJ)
-	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf
+	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
 	@$(CC) $(CFLAGS) -c $< -o $@

@@ -1,7 +1,6 @@
 #ifndef RATELIMIT_H
 #define RATELIMIT_H
 
-#include <linux/limits.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -9,15 +8,15 @@ typedef enum {
     RATELIMIT_OK = 0,
     RATELIMIT_INVALID_PID,
     RATELIMIT_ALLOC,
-    RATELIMIT_MKDIR_CGROUP,
     RATELIMIT_OPEN_CGROUP,
-    RATELIMIT_WRITE_PID,
     RATELIMIT_BPF_OPEN,
     RATELIMIT_BPF_LOAD,
     RATELIMIT_BPF_ATTACH,
     RATELIMIT_CGROUP_NOT_FOUND,
-    RATELIMIT_SETUP_CGROUP,
-    RATELIMIT_ATTACH_BPF
+    RATELIMIT_LIBCG_INIT,
+    RATELIMIT_LIBCG_CREATE,
+    RATELIMIT_LIBCG_ATTACH,
+    RATELIMIT_LIBCG_DELETE
 } ratelimit_code;
 
 typedef struct {
@@ -25,11 +24,7 @@ typedef struct {
     uint32_t download_kbps;
 } rate_limit_config;
 
-typedef struct {
-    char cgroup_path[PATH_MAX];
-    struct ratelimit_bpf *skel;
-    int cgroup_fd;
-} rate_limiter;
+typedef struct rate_limiter rate_limiter;
 
 ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config);
 
