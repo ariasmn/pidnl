@@ -26,9 +26,14 @@ int __wrap_bpf_object__load_skeleton(struct bpf_object_skeleton *s) {
     return (int)mock();
 }
 
-void __wrap_bpf_object__destroy_skeleton(struct bpf_object_skeleton *s) { (void)s; }
-
-void __wrap_ratelimit_bpf__destroy(struct ratelimit_bpf *skel) { (void)skel; }
+void __wrap_bpf_object__destroy_skeleton(struct bpf_object_skeleton *s) {
+    if (!s) {
+        return;
+    }
+    free(s->maps);
+    free(s->progs);
+    free(s);
+}
 
 int __wrap_bpf_map__fd(const struct bpf_map *map) {
     (void)map;
