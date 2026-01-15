@@ -1,0 +1,22 @@
+name: Valgrind
+on: [push, pull_request]
+jobs:
+  valgrind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            bpftool \
+            linux-tools-common \
+            libbpf-dev \
+            libnl-3-dev \
+            libnl-route-3-dev \
+            libcmocka-dev \
+            libelf-dev \
+            valgrind
+      - name: Run Valgrind
+        run: make valgrind
