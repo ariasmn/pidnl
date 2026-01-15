@@ -116,8 +116,9 @@ ssize_t __wrap_readlink(const char *pathname, char *buf, size_t bufsiz) {
         const char *link_target = (const char *)mock();
         if (link_target) {
             size_t len = strlen(link_target);
-            if (len > bufsiz - 1)
+            if (len > bufsiz - 1) {
                 len = bufsiz - 1;
+            }
             memcpy(buf, link_target, len);
             return len;
         }
@@ -291,23 +292,13 @@ static void test_discovery_code_string(void **state) {
     (void)state;
 
     assert_string_equal(discovery_code_string(DISCOVERY_OK), "Success");
+    assert_string_equal(discovery_code_string(DISCOVERY_ALLOC), "Failed to allocate memory");
+    assert_string_equal(discovery_code_string(DISCOVERY_SOCKET), "Failed to create netlink socket");
+    assert_string_equal(discovery_code_string(DISCOVERY_BIND), "Failed to bind netlink socket");
     assert_string_equal(
-        discovery_code_string(DISCOVERY_ALLOC), "Failed to allocate memory"
+        discovery_code_string(DISCOVERY_RECVMSG), "Failed to receive netlink messages"
     );
-    assert_string_equal(
-        discovery_code_string(DISCOVERY_SOCKET),
-        "Failed to create netlink socket"
-    );
-    assert_string_equal(
-        discovery_code_string(DISCOVERY_BIND), "Failed to bind netlink socket"
-    );
-    assert_string_equal(
-        discovery_code_string(DISCOVERY_RECVMSG),
-        "Failed to receive netlink messages"
-    );
-    assert_string_equal(
-        discovery_code_string(DISCOVERY_NETLINK_MSG), "Netlink error received"
-    );
+    assert_string_equal(discovery_code_string(DISCOVERY_NETLINK_MSG), "Netlink error received");
     assert_string_equal(discovery_code_string(99), "Unknown error");
 }
 

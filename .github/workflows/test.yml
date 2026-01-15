@@ -1,0 +1,22 @@
+name: Test
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            linux-tools-generic \
+            libbpf-dev \
+            libnl-3-dev \
+            libnl-route-3-dev \
+            libcmocka-dev \
+            libelf-dev \
+            gcc-multilib \
+            libc6-dev
+      - name: Run tests
+        run: make test

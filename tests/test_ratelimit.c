@@ -27,10 +27,13 @@ int __wrap_bpf_object__load_skeleton(struct bpf_object_skeleton *s) {
 }
 
 void __wrap_bpf_object__destroy_skeleton(struct bpf_object_skeleton *s) {
-    (void)s;
+    if (!s) {
+        return;
+    }
+    free(s->maps);
+    free(s->progs);
+    free(s);
 }
-
-void __wrap_ratelimit_bpf__destroy(struct ratelimit_bpf *skel) { (void)skel; }
 
 int __wrap_bpf_map__fd(const struct bpf_map *map) {
     (void)map;
@@ -42,9 +45,7 @@ int __wrap_bpf_program__fd(const struct bpf_program *prog) {
     return (int)mock();
 }
 
-int __wrap_bpf_map_update_elem(
-    int fd, const void *key, const void *value, __u64 flags
-) {
+int __wrap_bpf_map_update_elem(int fd, const void *key, const void *value, __u64 flags) {
     (void)key;
     (void)value;
     (void)flags;
@@ -52,9 +53,7 @@ int __wrap_bpf_map_update_elem(
     return (int)mock();
 }
 
-int __wrap_bpf_prog_attach(
-    int prog_fd, int target_fd, int type, unsigned int flags
-) {
+int __wrap_bpf_prog_attach(int prog_fd, int target_fd, int type, unsigned int flags) {
     (void)flags;
     check_expected(prog_fd);
     check_expected(target_fd);
@@ -144,9 +143,7 @@ static void test_limit_process_bandwidth(void **state) {
     will_return(__wrap_mkdir, 0);
 
     /* open cgroup.procs */
-    expect_string(
-        __wrap_open, pathname, "/sys/fs/cgroup/strait/1234/cgroup.procs"
-    );
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234/cgroup.procs");
     will_return(__wrap_open, 10);
 
     /* write PID */
@@ -200,7 +197,6 @@ static void test_limit_process_bandwidth(void **state) {
 
     assert_int_equal(result, RATELIMIT_OK);
 }
-
 
 static void test_close_rate_limiter_handle_valid(void **state) {
     (void)state;
@@ -272,12 +268,8 @@ static void test_ratelimit_code_string(void **state) {
     (void)state;
 
     assert_string_equal(ratelimit_code_string(RATELIMIT_OK), "Success");
-    assert_string_equal(
-        ratelimit_code_string(RATELIMIT_INVALID_PID), "Invalid PID"
-    );
-    assert_string_equal(
-        ratelimit_code_string(RATELIMIT_BPF_OPEN), "Failed to open BPF object"
-    );
+    assert_string_equal(ratelimit_code_string(RATELIMIT_INVALID_PID), "Invalid PID");
+    assert_string_equal(ratelimit_code_string(RATELIMIT_BPF_OPEN), "Failed to open BPF object");
 }
 
 int main(void) {

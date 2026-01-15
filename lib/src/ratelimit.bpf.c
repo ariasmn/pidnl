@@ -34,8 +34,7 @@ struct {
 // We need to revisit this since it's also not super reliable, but enough to
 // work on all the logic and later change the algorithm.
 // Returns: 1 = allow, 0 = drop
-static __always_inline int
-apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
+static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
     struct rate_limit_state *state;
     __u64 now = bpf_ktime_get_ns();
     __u64 tokens_to_add;
@@ -68,7 +67,8 @@ apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
     return 0;
 }
 
-SEC("cgroup/skb") int egress_rate_limit(struct __sk_buff *skb) {
+SEC("cgroup/skb")
+int egress_rate_limit(struct __sk_buff *skb) {
     __u32 key = DIRECTION_UPLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
@@ -77,7 +77,8 @@ SEC("cgroup/skb") int egress_rate_limit(struct __sk_buff *skb) {
     return apply_rate_limit(DIRECTION_UPLOAD, *limit, skb->len);
 }
 
-SEC("cgroup/skb") int ingress_rate_limit(struct __sk_buff *skb) {
+SEC("cgroup/skb")
+int ingress_rate_limit(struct __sk_buff *skb) {
     __u32 key = DIRECTION_DOWNLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {

@@ -30,8 +30,9 @@ typedef struct {
 
 static process_list *create_process_list(void) {
     process_list *list = malloc(sizeof(process_list));
-    if (!list)
+    if (!list) {
         return NULL;
+    }
 
     list->capacity = 64;
     list->count = 0;
@@ -103,34 +104,36 @@ static pid_t find_pid_by_inode(unsigned int inode) {
     char link[SOCKET_LINK_MAX];
 
     DIR *proc_dir = opendir("/proc");
-    if (!proc_dir)
+    if (!proc_dir) {
         return -1;
+    }
 
     struct dirent *proc_entry;
     while ((proc_entry = readdir(proc_dir)) != NULL) {
-        if (proc_entry->d_name[0] == '.')
+        if (proc_entry->d_name[0] == '.') {
             continue;
+        }
 
         char *endptr;
         long pid = strtol(proc_entry->d_name, &endptr, 10);
-        if (endptr == proc_entry->d_name)
+        if (endptr == proc_entry->d_name) {
             continue;
+        }
 
         snprintf(path, sizeof(path), "/proc/%ld/fd", pid);
         DIR *fd_dir = opendir(path);
-        if (!fd_dir)
+        if (!fd_dir) {
             continue;
+        }
 
         struct dirent *fd_entry;
         while ((fd_entry = readdir(fd_dir)) != NULL) {
-            if (fd_entry->d_name[0] == '.')
+            if (fd_entry->d_name[0] == '.') {
                 continue;
+            }
 
             char fd_path[PATH_MAX];
-            snprintf(
-                fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid,
-                fd_entry->d_name
-            );
+            snprintf(fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid, fd_entry->d_name);
 
             ssize_t len = readlink(fd_path, link, sizeof(link) - 1);
             if (len > 0) {
@@ -168,10 +171,7 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
     struct sockaddr_nl nladdr = {.nl_family = AF_NETLINK};
     struct iovec iov = {.iov_base = &request, .iov_len = sizeof(request)};
     struct msghdr msg = {
-        .msg_name = &nladdr,
-        .msg_namelen = sizeof(nladdr),
-        .msg_iov = &iov,
-        .msg_iovlen = 1
+        .msg_name = &nladdr, .msg_namelen = sizeof(nladdr), .msg_iov = &iov, .msg_iovlen = 1
     };
 
     if (sendmsg(fd, &msg, 0) < 0) {
@@ -191,8 +191,9 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
             }
             return -1;
         }
-        if (ret == 0)
+        if (ret == 0) {
             return 0;
+        }
 
         struct nlmsghdr *h = (struct nlmsghdr *)buf;
         while (NLMSG_OK(h, ret)) {

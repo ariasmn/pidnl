@@ -2,6 +2,10 @@ BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
-AlignAfterOpenBracket: BlockIndent
-SpacesBeforeTrailingComments: 1
 SortIncludes: Never
+AlignAfterOpenBracket: BlockIndent
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackParameters: false
+BinPackArguments: false
+BreakBeforeBinaryOperators: None
+ColumnLimit: 100
