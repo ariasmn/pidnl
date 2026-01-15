@@ -3,6 +3,7 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <mntent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
@@ -12,8 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define CGROUP_PARENT "strait"
-#define CGROUP_MOUNT "/sys/fs/cgroup"
+#define CGROUP_NAME "strait"
 
 static const unsigned int DIRECTION_UPLOAD = 0;
 static const unsigned int DIRECTION_DOWNLOAD = 1;
@@ -37,14 +37,26 @@ static ratelimit_code ensure_libcgroup_init(void) {
     return RATELIMIT_OK;
 }
 
-static void get_cgroup_name(pid_t pid, char *buf, size_t size) {
-    snprintf(buf, size, "%s/%d", CGROUP_PARENT, pid);
-}
-
-static int open_cgroup_fd(const char *cgroup_name) {
+static int open_cgroup_fd(const char *name) {
     char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/%s", CGROUP_MOUNT, cgroup_name);
-    return open(path, O_RDONLY);
+    FILE *f;
+    struct mntent *ent;
+    
+    f = setmntent("/proc/mounts", "r");
+    if (!f) {
+        return -1;
+    }
+    
+    while ((ent = getmntent(f)) != NULL) {
+        if (strcmp(ent->mnt_type, "cgroup2") == 0) {
+            snprintf(path, sizeof(path), "%s/%s", ent->mnt_dir, name);
+            endmntent(f);
+            return open(path, O_RDONLY);
+        }
+    }
+    
+    endmntent(f);
+    return -1;
 }
 
 static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
@@ -62,69 +74,20 @@ static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
         return RATELIMIT_LIBCG_CREATE;
     }
 
-    if (out) {
-        *out = cg;
-    } else {
-        cgroup_free(&cg);
-    }
+    *out = cg;
     return RATELIMIT_OK;
 }
 
-static void delete_cgroup(const char *name, int cgroup_fd) {
-    struct cgroup *cg;
-
+static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
     if (cgroup_fd >= 0) {
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
         close(cgroup_fd);
     }
 
-    cg = cgroup_new_cgroup(name);
     if (cg) {
         cgroup_delete_cgroup(cg, 1);
-        cgroup_free(&cg);
     }
-}
-
-static ratelimit_code setup_cgroup(pid_t pid, struct cgroup **out_cg, int *out_fd) {
-    char cgroup_name[PATH_MAX];
-    struct cgroup *cg;
-    ratelimit_code err;
-    int fd;
-
-    err = ensure_libcgroup_init();
-    if (err != RATELIMIT_OK) {
-        return err;
-    }
-
-    err = create_cgroup(CGROUP_PARENT, NULL);
-    if (err != RATELIMIT_OK) {
-        return err;
-    }
-
-    get_cgroup_name(pid, cgroup_name, sizeof(cgroup_name));
-
-    err = create_cgroup(cgroup_name, &cg);
-    if (err != RATELIMIT_OK) {
-        return err;
-    }
-
-    if (cgroup_attach_task_pid(cg, pid) != 0) {
-        cgroup_delete_cgroup(cg, 1);
-        cgroup_free(&cg);
-        return RATELIMIT_LIBCG_ATTACH;
-    }
-
-    fd = open_cgroup_fd(cgroup_name);
-    if (fd < 0) {
-        cgroup_delete_cgroup(cg, 1);
-        cgroup_free(&cg);
-        return RATELIMIT_OPEN_CGROUP;
-    }
-
-    *out_cg = cg;
-    *out_fd = fd;
-    return RATELIMIT_OK;
 }
 
 static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
@@ -182,42 +145,72 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     return RATELIMIT_OK;
 }
 
+static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
+    snprintf(buf, size, "%s/%d", CGROUP_NAME, pid);
+}
+
 ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     rate_limiter *limiter;
-    char cgroup_name[PATH_MAX];
+    struct cgroup *parent = NULL, *child = NULL;
     ratelimit_code err;
-    int old_fd;
+    int cgroup_fd;
+    char name[64];
 
     if (pid <= 0) {
         return RATELIMIT_INVALID_PID;
     }
 
-    get_cgroup_name(pid, cgroup_name, sizeof(cgroup_name));
-    old_fd = open_cgroup_fd(cgroup_name);
-    if (old_fd >= 0) {
-        delete_cgroup(cgroup_name, old_fd);
+    err = ensure_libcgroup_init();
+    if (err != RATELIMIT_OK) {
+        return err;
+    }
+
+    err = create_cgroup(CGROUP_NAME, &parent);
+    if (err != RATELIMIT_OK) {
+        return err;
+    }
+
+    build_cgroup_name(pid, name, sizeof(name));
+    err = create_cgroup(name, &child);
+    if (err != RATELIMIT_OK) {
+        cgroup_free(&parent);
+        return err;
+    }
+
+    if (cgroup_attach_task_pid(child, pid) != 0) {
+        cgroup_delete_cgroup(child, 1);
+        cgroup_free(&child);
+        cgroup_free(&parent);
+        return RATELIMIT_LIBCG_ATTACH;
+    }
+
+    cgroup_fd = open_cgroup_fd(name);
+    if (cgroup_fd < 0) {
+        cgroup_delete_cgroup(child, 1);
+        cgroup_free(&child);
+        cgroup_free(&parent);
+        return RATELIMIT_OPEN_CGROUP;
     }
 
     limiter = calloc(1, sizeof(rate_limiter));
     if (!limiter) {
+        delete_cgroup(child, cgroup_fd);
+        cgroup_free(&parent);
         return RATELIMIT_ALLOC;
     }
 
-    err = setup_cgroup(pid, &limiter->cg, &limiter->cgroup_fd);
-    if (err != RATELIMIT_OK) {
-        free(limiter);
-        return err;
-    }
+    limiter->cg = child;
+    limiter->cgroup_fd = cgroup_fd;
 
     err = attach_bpf_programs(limiter, config);
     if (err != RATELIMIT_OK) {
-        cgroup_delete_cgroup(limiter->cg, 1);
-        cgroup_free(&limiter->cg);
-        close(limiter->cgroup_fd);
+        delete_cgroup(limiter->cg, limiter->cgroup_fd);
+        cgroup_free(&parent);
         free(limiter);
         return err;
     }
 
+    cgroup_free(&parent);
     close_rate_limiter_handle(limiter);
     return RATELIMIT_OK;
 }
@@ -229,27 +222,39 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
     if (limiter->skel) {
         ratelimit_bpf__destroy(limiter->skel);
     }
-    if (limiter->cg) {
-        cgroup_free(&limiter->cg);
-    }
     free(limiter);
 }
 
 ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
-    char cgroup_name[PATH_MAX];
+    struct cgroup *cg = NULL;
     int cgroup_fd;
+    ratelimit_code err;
+    char name[64];
 
-    if (ensure_libcgroup_init() != RATELIMIT_OK) {
-        return RATELIMIT_LIBCG_INIT;
+    err = ensure_libcgroup_init();
+    if (err != RATELIMIT_OK) {
+        return err;
     }
 
-    get_cgroup_name(pid, cgroup_name, sizeof(cgroup_name));
-    cgroup_fd = open_cgroup_fd(cgroup_name);
-    if (cgroup_fd < 0) {
+    build_cgroup_name(pid, name, sizeof(name));
+
+    cg = cgroup_new_cgroup(name);
+    if (!cg) {
+        return RATELIMIT_LIBCG_DELETE;
+    }
+
+    if (cgroup_get_cgroup(cg) != 0) {
+        cgroup_free(&cg);
         return RATELIMIT_CGROUP_NOT_FOUND;
     }
 
-    delete_cgroup(cgroup_name, cgroup_fd);
+    cgroup_fd = open_cgroup_fd(name);
+    if (cgroup_fd < 0) {
+        cgroup_free(&cg);
+        return RATELIMIT_CGROUP_NOT_FOUND;
+    }
+
+    delete_cgroup(cg, cgroup_fd);
     return RATELIMIT_OK;
 }
 
