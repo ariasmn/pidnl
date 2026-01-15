@@ -41,12 +41,12 @@ static int open_cgroup_fd(const char *name) {
     char path[PATH_MAX];
     FILE *f;
     struct mntent *ent;
-    
+
     f = setmntent("/proc/mounts", "r");
     if (!f) {
         return -1;
     }
-    
+
     while ((ent = getmntent(f)) != NULL) {
         if (strcmp(ent->mnt_type, "cgroup2") == 0) {
             snprintf(path, sizeof(path), "%s/%s", ent->mnt_dir, name);
@@ -54,7 +54,7 @@ static int open_cgroup_fd(const char *name) {
             return open(path, O_RDONLY);
         }
     }
-    
+
     endmntent(f);
     return -1;
 }
@@ -87,6 +87,7 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
 
     if (cg) {
         cgroup_delete_cgroup(cg, 1);
+        cgroup_free(&cg);
     }
 }
 
@@ -94,6 +95,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     struct ratelimit_bpf *skel;
     int map_fd, err;
     __u64 upload_bps, download_bps;
+    ratelimit_code ret;
 
     skel = ratelimit_bpf__open();
     if (!skel) {
@@ -118,24 +120,24 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
         return RATELIMIT_BPF_LOAD;
     }
 
-    err = bpf_prog_attach(
+    ret = bpf_prog_attach(
         bpf_program__fd(skel->progs.egress_rate_limit),
         limiter->cgroup_fd,
         BPF_CGROUP_INET_EGRESS,
         0
     );
-    if (err) {
+    if (ret) {
         ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_ATTACH;
     }
 
-    err = bpf_prog_attach(
+    ret = bpf_prog_attach(
         bpf_program__fd(skel->progs.ingress_rate_limit),
         limiter->cgroup_fd,
         BPF_CGROUP_INET_INGRESS,
         0
     );
-    if (err) {
+    if (ret) {
         bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
         ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_ATTACH;
@@ -221,6 +223,9 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
     }
     if (limiter->skel) {
         ratelimit_bpf__destroy(limiter->skel);
+    }
+    if (limiter->cg) {
+        cgroup_free(&limiter->cg);
     }
     free(limiter);
 }
