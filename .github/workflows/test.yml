@@ -16,6 +16,7 @@ jobs:
             libnl-route-3-dev \
             libcmocka-dev \
             libelf-dev \
+            libcgroup-dev \
             gcc-multilib \
             libc6-dev
       - name: Run tests
