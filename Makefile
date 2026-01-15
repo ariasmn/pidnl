@@ -58,14 +58,16 @@ test: $(BPF_SKEL)
 		-Wl,--wrap=readlink -Wl,--wrap=fopen -Wl,--wrap=fgets -Wl,--wrap=fclose \
 		-lcmocka -pie; \
 	$(CC) $(TEST_CFLAGS) -I$(LIBSRC) -I. $(TEST_RATELIMIT_SRC) $(TEST_RATELIMIT_OBJ) -o $(TEST_RATELIMIT_BIN) \
-		-Wl,--wrap=stat -Wl,--wrap=mkdir -Wl,--wrap=open -Wl,--wrap=close -Wl,--wrap=write \
-		-Wl,--wrap=fdopendir -Wl,--wrap=readdir -Wl,--wrap=closedir -Wl,--wrap=rmdir \
+		-Wl,--wrap=cgroup_init -Wl,--wrap=cgroup_new_cgroup -Wl,--wrap=cgroup_create_cgroup \
+		-Wl,--wrap=cgroup_delete_cgroup -Wl,--wrap=cgroup_attach_task_pid -Wl,--wrap=cgroup_get_cgroup \
+		-Wl,--wrap=cgroup_get_last_errno -Wl,--wrap=cgroup_free \
+		-Wl,--wrap=open -Wl,--wrap=close \
 		-Wl,--wrap=bpf_object__open_skeleton -Wl,--wrap=bpf_object__load_skeleton \
 		-Wl,--wrap=bpf_object__destroy_skeleton \
 		-Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
-		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach -Wl,--wrap=unlinkat \
+		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach \
 		-Wl,--wrap=ratelimit_bpf__destroy \
-		-lcmocka -lbpf -pie; \
+		-lcmocka -lbpf -lcgroup -pie; \
 	./tests/test_discovery; \
 	./tests/test_ratelimit
 
@@ -81,14 +83,16 @@ valgrind: $(BPF_SKEL)
 	        -Wl,--wrap=readlink -Wl,--wrap=fopen -Wl,--wrap=fgets -Wl,--wrap=fclose \
 	        -lcmocka -pie > /dev/null 2>&1; \
 	$(CC) $(TEST_CFLAGS) -I$(LIBSRC) -I. $(TEST_RATELIMIT_SRC) $(TEST_RATELIMIT_OBJ) -o $(TEST_RATELIMIT_BIN) \
-	        -Wl,--wrap=stat -Wl,--wrap=mkdir -Wl,--wrap=open -Wl,--wrap=close -Wl,--wrap=write \
-	        -Wl,--wrap=fdopendir -Wl,--wrap=readdir -Wl,--wrap=closedir -Wl,--wrap=rmdir \
+	        -Wl,--wrap=cgroup_init -Wl,--wrap=cgroup_new_cgroup -Wl,--wrap=cgroup_create_cgroup \
+	        -Wl,--wrap=cgroup_delete_cgroup -Wl,--wrap=cgroup_attach_task_pid -Wl,--wrap=cgroup_get_cgroup \
+	        -Wl,--wrap=cgroup_get_last_errno -Wl,--wrap=cgroup_free \
+	        -Wl,--wrap=open -Wl,--wrap=close \
 	        -Wl,--wrap=bpf_object__open_skeleton -Wl,--wrap=bpf_object__load_skeleton \
 	        -Wl,--wrap=bpf_object__destroy_skeleton \
 	        -Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
-	        -Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach -Wl,--wrap=unlinkat \
+	        -Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach \
 	        -Wl,--wrap=ratelimit_bpf__destroy \
-	        -lcmocka -lbpf -pie > /dev/null 2>&1; \
+	        -lcmocka -lbpf -lcgroup -pie > /dev/null 2>&1; \
 	valgrind --log-fd=3 -s -q --leak-check=full --show-leak-kinds=all \
 	        --errors-for-leak-kinds=definite,indirect --error-exitcode=1 ./tests/test_discovery 3>&2 >/dev/null 2>&1; \
 	valgrind --log-fd=3 -s -q --leak-check=full --show-leak-kinds=all \
