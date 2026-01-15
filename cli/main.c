@@ -234,6 +234,12 @@ static void print_command_list(void) {
 }
 
 int main(int argc, char *argv[]) {
+    ratelimit_code err = ratelimit_init();
+    if (err != RATELIMIT_OK) {
+        fprintf(stderr, "%s: %s\n", PROGRAM_NAME, ratelimit_code_string(err));
+        return EXIT_FAILURE;
+    }
+
     int global_help = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
