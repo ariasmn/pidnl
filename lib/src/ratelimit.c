@@ -41,8 +41,7 @@ static int ensure_parent_cgroup() {
     return 0;
 }
 
-static ratelimit_code
-setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
+static ratelimit_code setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
     int fd;
     char pid_str[PID_STR_MAX];
     int ret;
@@ -76,8 +75,7 @@ setup_cgroup(pid_t pid, char *cgroup_path, size_t path_size) {
     return RATELIMIT_OK;
 }
 
-static ratelimit_code
-attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
+static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     struct ratelimit_bpf *skel;
     int rate_limits_map_fd;
     int cgroup_fd;
@@ -100,17 +98,13 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     upload_bps = (__u64)config.upload_kbps * 1000 / 8;
     download_bps = (__u64)config.download_kbps * 1000 / 8;
 
-    err = bpf_map_update_elem(
-        rate_limits_map_fd, &DIRECTION_UPLOAD, &upload_bps, 0
-    );
+    err = bpf_map_update_elem(rate_limits_map_fd, &DIRECTION_UPLOAD, &upload_bps, 0);
     if (err) {
         ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_LOAD;
     }
 
-    err = bpf_map_update_elem(
-        rate_limits_map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0
-    );
+    err = bpf_map_update_elem(rate_limits_map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0);
     if (err) {
         ratelimit_bpf__destroy(skel);
         return RATELIMIT_BPF_LOAD;
@@ -123,8 +117,7 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     }
 
     err = bpf_prog_attach(
-        bpf_program__fd(skel->progs.egress_rate_limit), cgroup_fd,
-        BPF_CGROUP_INET_EGRESS, 0
+        bpf_program__fd(skel->progs.egress_rate_limit), cgroup_fd, BPF_CGROUP_INET_EGRESS, 0
     );
     if (err) {
         close(cgroup_fd);
@@ -133,8 +126,7 @@ attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     }
 
     err = bpf_prog_attach(
-        bpf_program__fd(skel->progs.ingress_rate_limit), cgroup_fd,
-        BPF_CGROUP_INET_INGRESS, 0
+        bpf_program__fd(skel->progs.ingress_rate_limit), cgroup_fd, BPF_CGROUP_INET_INGRESS, 0
     );
     if (err) {
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
@@ -170,8 +162,7 @@ static int cleanup_cgroup(pid_t pid, const char *cgroup_path) {
         d = fdopendir(dir_fd);
         if (d != NULL) {
             while ((entry = readdir(d)) != NULL) {
-                if (strcmp(entry->d_name, ".") == 0 ||
-                    strcmp(entry->d_name, "..") == 0) {
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
                     continue;
                 }
                 unlinkat(dir_fd, entry->d_name, 0);
@@ -242,8 +233,9 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
 }
 
 void close_rate_limiter_handle(rate_limiter *limiter) {
-    if (!limiter)
+    if (!limiter) {
         return;
+    }
 
     if (limiter->skel) {
         ratelimit_bpf__destroy(limiter->skel);

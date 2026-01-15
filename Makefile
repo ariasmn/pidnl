@@ -98,6 +98,6 @@ clean:
 	rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL) $(TEST_OBJ) $(TEST_BIN) $(TEST_RATELIMIT_OBJ) $(TEST_RATELIMIT_BIN)
 
 lint:
-	clang-format --dry-run --Werror cli/*.c lib/src/*.c tests/*.c
+	@clang-format --dry-run --Werror cli/*.c lib/src/*.c tests/*.c
 
 .PHONY: dev clean check-deps test valgrind lint
