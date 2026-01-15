@@ -1,5 +1,5 @@
 name: Valgrind
-on: [push, pull_request]
+on: [pull_request]
 jobs:
   valgrind:
     runs-on: ubuntu-latest
@@ -10,8 +10,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang \
-            bpftool \
-            linux-tools-common \
+            linux-tools-generic \
             libbpf-dev \
             libnl-3-dev \
             libnl-route-3-dev \
