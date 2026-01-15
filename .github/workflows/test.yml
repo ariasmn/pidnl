@@ -15,8 +15,8 @@ jobs:
             libnl-3-dev \
             libnl-route-3-dev \
             libcmocka-dev \
-            libelf-dev
-      - name: Build
-        run: make dev
+            libelf-dev \
+            gcc-multilib \
+            libc6-dev
       - name: Run tests
         run: make test
