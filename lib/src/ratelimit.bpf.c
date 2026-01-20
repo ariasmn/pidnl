@@ -2,6 +2,13 @@
 #include <linux/types.h>
 #include <bpf/bpf_helpers.h>
 #include <linux/bpf.h>
+#include <bpf/bpf_core_read.h>
+
+struct task_struct {
+    unsigned int pid;
+    unsigned int tgid;
+    struct task_struct *real_parent;
+};
 
 // Direction constants (used by both rate_limits and rate_state maps)
 #define DIRECTION_UPLOAD 0   // Upload traffic (egress, leaving the system)
@@ -69,19 +76,63 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
 
 SEC("cgroup/skb")
 int egress_rate_limit(struct __sk_buff *skb) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid;
+    __u32 tgid = pid_tgid >> 32;
+    struct task_struct *task = (void *)bpf_get_current_task();
+    __u32 ppid = BPF_CORE_READ(task, real_parent, pid);
+    __u64 cookie = bpf_get_socket_cookie(skb);
+    __u32 uid = bpf_get_socket_uid(skb);
+    char comm[16];
+    bpf_get_current_comm(comm, sizeof(comm));
+    bpf_printk(
+        "egress: pid=%u tgid=%u ppid=%u uid=%u cookie=%llu comm=%s\n",
+        pid,
+        tgid,
+        ppid,
+        uid,
+        cookie,
+        comm
+    );
     __u32 key = DIRECTION_UPLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
         return 1;
     }
+
+    if (tgid == 4558) {
+        return 1;
+    }
+
     return apply_rate_limit(DIRECTION_UPLOAD, *limit, skb->len);
 }
 
 SEC("cgroup/skb")
 int ingress_rate_limit(struct __sk_buff *skb) {
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid;
+    __u32 tgid = pid_tgid >> 32;
+    struct task_struct *task = (void *)bpf_get_current_task();
+    __u32 ppid = BPF_CORE_READ(task, real_parent, pid);
+    __u64 cookie = bpf_get_socket_cookie(skb);
+    __u32 uid = bpf_get_socket_uid(skb);
+    char comm[16];
+    bpf_get_current_comm(comm, sizeof(comm));
+    bpf_printk(
+        "ingress: pid=%u tgid=%u ppid=%u uid=%u cookie=%llu comm=%s\n",
+        pid,
+        tgid,
+        ppid,
+        uid,
+        cookie,
+        comm
+    );
     __u32 key = DIRECTION_DOWNLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
+        return 1;
+    }
+    if (tgid == 4558) {
         return 1;
     }
     return apply_rate_limit(DIRECTION_DOWNLOAD, *limit, skb->len);

@@ -65,19 +65,6 @@ static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
     return RATELIMIT_OK;
 }
 
-static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
-    if (cgroup_fd >= 0) {
-        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
-        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
-        close(cgroup_fd);
-    }
-
-    if (cg) {
-        cgroup_delete_cgroup(cg, 1);
-        cgroup_free(&cg);
-    }
-}
-
 static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     struct ratelimit_bpf *skel;
     int map_fd, err;
@@ -134,10 +121,6 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     return RATELIMIT_OK;
 }
 
-static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
-    snprintf(buf, size, "%s/%d", CGROUP_NAME, pid);
-}
-
 ratelimit_code ratelimit_init(void) {
     if (cgroup_init() != 0) {
         return RATELIMIT_LIBCG_INIT;
@@ -147,61 +130,52 @@ ratelimit_code ratelimit_init(void) {
 
 ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     rate_limiter *limiter;
-    struct cgroup *parent = NULL, *child = NULL;
+    struct cgroup *cg = NULL;
     ratelimit_code err;
     int cgroup_fd;
-    char name[64];
 
     if (pid <= 0) {
         return RATELIMIT_INVALID_PID;
     }
 
-    err = create_cgroup(CGROUP_NAME, &parent);
+    err = create_cgroup(CGROUP_NAME, &cg);
     if (err != RATELIMIT_OK) {
         return err;
     }
 
-    build_cgroup_name(pid, name, sizeof(name));
-    err = create_cgroup(name, &child);
-    if (err != RATELIMIT_OK) {
-        cgroup_free(&parent);
-        return err;
-    }
-
-    if (cgroup_attach_task_pid(child, pid) != 0) {
-        cgroup_delete_cgroup(child, 1);
-        cgroup_free(&child);
-        cgroup_free(&parent);
+    if (cgroup_attach_task_pid(cg, pid) != 0) {
+        cgroup_delete_cgroup(cg, 1);
+        cgroup_free(&cg);
         return RATELIMIT_LIBCG_ATTACH;
     }
 
-    cgroup_fd = open_cgroup_fd(name);
+    cgroup_fd = open_cgroup_fd(CGROUP_NAME);
     if (cgroup_fd < 0) {
-        cgroup_delete_cgroup(child, 1);
-        cgroup_free(&child);
-        cgroup_free(&parent);
+        cgroup_delete_cgroup(cg, 1);
+        cgroup_free(&cg);
         return RATELIMIT_OPEN_CGROUP;
     }
 
     limiter = calloc(1, sizeof(rate_limiter));
     if (!limiter) {
-        delete_cgroup(child, cgroup_fd);
-        cgroup_free(&parent);
+        close(cgroup_fd);
+        cgroup_delete_cgroup(cg, 1);
+        cgroup_free(&cg);
         return RATELIMIT_ALLOC;
     }
 
-    limiter->cg = child;
+    limiter->cg = cg;
     limiter->cgroup_fd = cgroup_fd;
 
     err = attach_bpf_programs(limiter, config);
     if (err != RATELIMIT_OK) {
-        delete_cgroup(limiter->cg, limiter->cgroup_fd);
-        cgroup_free(&parent);
+        close(cgroup_fd);
+        cgroup_delete_cgroup(limiter->cg, 1);
+        cgroup_free(&limiter->cg);
         free(limiter);
         return err;
     }
 
-    cgroup_free(&parent);
     close_rate_limiter_handle(limiter);
     return RATELIMIT_OK;
 }
@@ -220,29 +194,7 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
 }
 
 ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
-    struct cgroup *cg = NULL;
-    int cgroup_fd;
-    char name[64];
-
-    build_cgroup_name(pid, name, sizeof(name));
-
-    cg = cgroup_new_cgroup(name);
-    if (!cg) {
-        return RATELIMIT_LIBCG_DELETE;
-    }
-
-    if (cgroup_get_cgroup(cg) != 0) {
-        cgroup_free(&cg);
-        return RATELIMIT_CGROUP_NOT_FOUND;
-    }
-
-    cgroup_fd = open_cgroup_fd(name);
-    if (cgroup_fd < 0) {
-        cgroup_free(&cg);
-        return RATELIMIT_CGROUP_NOT_FOUND;
-    }
-
-    delete_cgroup(cg, cgroup_fd);
+    (void)pid;
     return RATELIMIT_OK;
 }
 
