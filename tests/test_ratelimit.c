@@ -110,6 +110,9 @@ int __wrap_open(const char *pathname, int flags, ...) {
     return (int)mock();
 }
 
+static int mock_path_index = 0;
+static char *mock_paths_next[] = {"1234", "5678", ""};
+
 int __wrap_cgroup_walk_tree_begin(
     const char *controller,
     const char *base_path,
@@ -123,8 +126,14 @@ int __wrap_cgroup_walk_tree_begin(
     (void)depth;
     (void)handle;
     (void)base_level;
-    info->type = mock_type(enum cgroup_file_type);
-    strcpy((char *)info->path, mock_type(char *));
+    mock_path_index = 0;
+    if (info) {
+        static char path_buffer[128];
+        memset(info, 0, sizeof(*info));
+        info->type = mock_type(enum cgroup_file_type);
+        strcpy(path_buffer, "");
+        info->path = path_buffer;
+    }
     return (int)mock();
 }
 
@@ -134,8 +143,17 @@ int __wrap_cgroup_walk_tree_next(
     (void)depth;
     (void)handle;
     (void)base_level;
-    info->type = mock_type(enum cgroup_file_type);
-    strcpy((char *)info->path, mock_type(char *));
+    if (info) {
+        static char path_buffer[128];
+        memset(info, 0, sizeof(*info));
+        info->type = mock_type(enum cgroup_file_type);
+        if (mock_path_index < 3) {
+            strcpy(path_buffer, mock_paths_next[mock_path_index++]);
+        } else {
+            strcpy(path_buffer, "");
+        }
+        info->path = path_buffer;
+    }
     return (int)mock();
 }
 
@@ -267,11 +285,9 @@ static void test_ratelimit_cleanup_all_success(void **state) {
     will_return(__wrap_cgroup_get_cgroup, 0);
 
     will_return(__wrap_cgroup_walk_tree_begin, CGROUP_FILE_TYPE_DIR);
-    will_return(__wrap_cgroup_walk_tree_begin, "");
     will_return(__wrap_cgroup_walk_tree_begin, 0);
 
     will_return(__wrap_cgroup_walk_tree_next, CGROUP_FILE_TYPE_DIR);
-    will_return(__wrap_cgroup_walk_tree_next, "1234");
     will_return(__wrap_cgroup_walk_tree_next, 0);
 
     expect_string(__wrap_cgroup_new_cgroup, name, "strait/1234");
@@ -288,7 +304,6 @@ static void test_ratelimit_cleanup_all_success(void **state) {
     will_return(__wrap_cgroup_delete_cgroup, 0);
 
     will_return(__wrap_cgroup_walk_tree_next, CGROUP_FILE_TYPE_DIR);
-    will_return(__wrap_cgroup_walk_tree_next, "5678");
     will_return(__wrap_cgroup_walk_tree_next, 0);
 
     expect_string(__wrap_cgroup_new_cgroup, name, "strait/5678");
@@ -305,11 +320,6 @@ static void test_ratelimit_cleanup_all_success(void **state) {
     will_return(__wrap_cgroup_delete_cgroup, 0);
 
     will_return(__wrap_cgroup_walk_tree_next, CGROUP_FILE_TYPE_DIR);
-    will_return(__wrap_cgroup_walk_tree_next, "");
-    will_return(__wrap_cgroup_walk_tree_next, 0);
-
-    will_return(__wrap_cgroup_walk_tree_next, CGROUP_FILE_TYPE_DIR);
-    will_return(__wrap_cgroup_walk_tree_next, "");
     will_return(__wrap_cgroup_walk_tree_next, ECGEOF);
 
     will_return(__wrap_cgroup_walk_tree_end, 0);
