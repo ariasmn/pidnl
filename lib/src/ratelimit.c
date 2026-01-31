@@ -272,7 +272,7 @@ ratelimit_code ratelimit_cleanup_all(void) {
             // The first one that we get in the iterator is the parent, so we need to skip it.
             if (!strcmp(child_path, "")) {
                 ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
-                continue;        
+                continue;
             }
 
             // Build child cgroup, get the fd to detach from BPF and delete.
