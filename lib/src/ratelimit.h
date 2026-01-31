@@ -16,7 +16,8 @@ typedef enum {
     RATELIMIT_LIBCG_INIT,
     RATELIMIT_LIBCG_CREATE,
     RATELIMIT_LIBCG_ATTACH,
-    RATELIMIT_LIBCG_DELETE
+    RATELIMIT_LIBCG_DELETE,
+    RATELIMIT_CLEANUP
 } ratelimit_code;
 
 typedef struct {
@@ -35,5 +36,7 @@ void close_rate_limiter_handle(rate_limiter *handle);
 ratelimit_code unregister_rate_limiter_by_pid(pid_t pid);
 
 const char *ratelimit_code_string(ratelimit_code code);
+
+ratelimit_code ratelimit_cleanup_all(void);
 
 #endif

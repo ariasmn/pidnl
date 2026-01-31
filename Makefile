@@ -62,6 +62,8 @@ test: $(BPF_SKEL)
 		-Wl,--wrap=cgroup_delete_cgroup -Wl,--wrap=cgroup_attach_task_pid -Wl,--wrap=cgroup_get_cgroup \
 		-Wl,--wrap=cgroup_get_last_errno -Wl,--wrap=cgroup_free \
 		-Wl,--wrap=open -Wl,--wrap=close \
+		-Wl,--wrap=cgroup_walk_tree_begin -Wl,--wrap=cgroup_walk_tree_next -Wl,--wrap=cgroup_walk_tree_end \
+		-Wl,--wrap=cgroup_get_subsys_mount_point \
 		-Wl,--wrap=bpf_object__open_skeleton -Wl,--wrap=bpf_object__load_skeleton \
 		-Wl,--wrap=bpf_object__destroy_skeleton \
 		-Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
@@ -87,6 +89,8 @@ valgrind: $(BPF_SKEL)
 	        -Wl,--wrap=cgroup_delete_cgroup -Wl,--wrap=cgroup_attach_task_pid -Wl,--wrap=cgroup_get_cgroup \
 	        -Wl,--wrap=cgroup_get_last_errno -Wl,--wrap=cgroup_free \
 	        -Wl,--wrap=open -Wl,--wrap=close \
+	        -Wl,--wrap=cgroup_walk_tree_begin -Wl,--wrap=cgroup_walk_tree_next -Wl,--wrap=cgroup_walk_tree_end \
+	        -Wl,--wrap=cgroup_get_subsys_mount_point \
 	        -Wl,--wrap=bpf_object__open_skeleton -Wl,--wrap=bpf_object__load_skeleton \
 	        -Wl,--wrap=bpf_object__destroy_skeleton \
 	        -Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \

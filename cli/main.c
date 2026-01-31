@@ -11,6 +11,7 @@ static const char *program_usage = "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [A
                                    "Commands:\n"
                                    "  list                List processes with network connections\n"
                                    "  limit               Limit bandwidth for a process\n"
+                                   "  clean               Clean up all rate limits and cgroups\n"
                                    "  help                Display this help message\n\n"
                                    "Options:\n"
                                    "  -h, --help          Display this help message";
@@ -24,6 +25,16 @@ static const char *limit_usage =
     "Examples:\n"
     "  " PROGRAM_NAME " limit set 12345 1000 2000\n"
     "  " PROGRAM_NAME " limit unset 12345";
+
+static const char *clean_usage =
+    "Usage: " PROGRAM_NAME " clean [--yes]\n\n"
+    "Clean up all rate limits and cgroups created by " PROGRAM_NAME ".\n\n"
+    "Options:\n"
+    "  --yes, -y  Skip confirmation prompt\n\n"
+    "This will:\n"
+    "  - Remove all rate limits from processes\n"
+    "  - Delete all child cgroups\n"
+    "  - Delete the parent 'strait' cgroup";
 
 typedef void (*cmd_handler)(int argc, char *argv[]);
 
@@ -210,9 +221,53 @@ static void cmd_help(int argc, char *argv[]) {
     printf("%s\n", program_usage);
 }
 
+static void cmd_clean(int argc, char *argv[]) {
+    int skip_confirmation = 0;
+
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
+            skip_confirmation = 1;
+            break;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("%s\n", clean_usage);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if (!skip_confirmation) {
+        printf("This will remove all rate limits created by " PROGRAM_NAME ".\n");
+        printf("Are you sure you want to continue? [y/N] ");
+
+        int ch = getchar();
+        if (ch != 'y' && ch != 'Y') {
+            printf("Aborted.\n");
+            exit(EXIT_SUCCESS);
+        }
+        while (getchar() != '\n')
+            ;
+    }
+
+    if (geteuid() != 0) {
+        fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
+        fprintf(stderr, "Try running with sudo:\n");
+        fprintf(stderr, "  sudo %s clean\n", PROGRAM_NAME);
+        exit(EXIT_FAILURE);
+    }
+
+    ratelimit_code err = ratelimit_cleanup_all();
+    if (err != RATELIMIT_OK) {
+        fprintf(stderr, "%s: %s\n", PROGRAM_NAME, ratelimit_code_string(err));
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Cleanup complete.\n");
+}
+
 static const command commands[] = {
     {"list", "List processes with network connections", cmd_list},
     {"limit", "Limit bandwidth for a process", cmd_limit},
+    {"clean", "Clean up all rate limits and cgroups", cmd_clean},
     {"help", "Display this help message", cmd_help},
 };
 
