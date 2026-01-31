@@ -33,7 +33,7 @@ static const char *clean_usage =
     "  --yes, -y  Skip confirmation prompt\n\n"
     "This will: remove all rate limits from processes\n";
 
-typedef void(*cmd_handler)(int argc, char *argv[]);
+typedef void (*cmd_handler)(int argc, char *argv[]);
 
 typedef struct {
     const char *name;
