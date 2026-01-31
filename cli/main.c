@@ -17,10 +17,10 @@ static const char *program_usage = "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [A
                                    "  -h, --help          Display this help message";
 
 static const char *limit_usage =
-    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> [<download_kbps>]\n"
+    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> <download_kbps>\n"
     "       " PROGRAM_NAME " limit unset <pid>\n\n"
     "Commands:\n"
-    "  set <pid> <upload> [<download>]  Limit bandwidth for a process\n"
+    "  set <pid> <upload> <download>    Limit bandwidth for a process\n"
     "  unset <pid>                      Remove rate limit for a process\n\n"
     "Examples:\n"
     "  " PROGRAM_NAME " limit set 12345 1000 2000\n"
@@ -31,10 +31,7 @@ static const char *clean_usage =
     "Clean up all rate limits and cgroups created by " PROGRAM_NAME ".\n\n"
     "Options:\n"
     "  --yes, -y  Skip confirmation prompt\n\n"
-    "This will:\n"
-    "  - Remove all rate limits from processes\n"
-    "  - Delete all child cgroups\n"
-    "  - Delete the parent 'strait' cgroup";
+    "This will: remove all rate limits from processes\n";
 
 typedef void (*cmd_handler)(int argc, char *argv[]);
 
@@ -92,24 +89,68 @@ static void cmd_limit_set(int argc, char *argv[]) {
         }
     }
 
-    if (help_shown || argc < 2) {
+    if (help_shown || argc < 3) {
         printf("%s\n", limit_usage);
         exit(EXIT_SUCCESS);
     }
 
     pid_t pid = (pid_t)atoi(argv[0]);
-    uint32_t upload_kbps = (uint32_t)atoi(argv[1]);
-    uint32_t download_kbps = argc >= 3 ? (uint32_t)atoi(argv[2]) : 0;
+    uint32_t upload_kbps =
+        (strcmp(argv[1], "-1") == 0) ? RATELIMIT_UNLIMITED : (uint32_t)atoi(argv[1]);
+    uint32_t download_kbps =
+        (strcmp(argv[2], "-1") == 0) ? RATELIMIT_UNLIMITED : (uint32_t)atoi(argv[2]);
+
+    if (upload_kbps == RATELIMIT_UNLIMITED && download_kbps == RATELIMIT_UNLIMITED) {
+        fprintf(
+            stderr, "%s: Error: Cannot set both upload and download to unlimited\n", PROGRAM_NAME
+        );
+        exit(EXIT_FAILURE);
+    }
 
     if (pid <= 0) {
         fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, argv[0]);
         exit(EXIT_FAILURE);
     }
 
+    process_list *list = NULL;
+    discovery_code disc_err = get_network_processes(&list);
+    if (disc_err != DISCOVERY_OK) {
+        fprintf(
+            stderr,
+            "%s: %s: %s\n",
+            PROGRAM_NAME,
+            "Failed to check process list",
+            discovery_code_string(disc_err)
+        );
+        exit(EXIT_FAILURE);
+    }
+
+    int pid_found = 0;
+    for (size_t i = 0; i < list->count; i++) {
+        if (list->processes[i].pid == pid) {
+            pid_found = 1;
+            break;
+        }
+    }
+
+    if (!pid_found) {
+        fprintf(
+            stderr,
+            "%s: PID %d not found in network process list. Run '%s list' to see available PIDs.\n",
+            PROGRAM_NAME,
+            pid,
+            PROGRAM_NAME
+        );
+        destroy_process_list(list);
+        exit(EXIT_FAILURE);
+    }
+
+    destroy_process_list(list);
+
     if (geteuid() != 0) {
         fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
         fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s limit set <pid> <upload> [<download>]\n", PROGRAM_NAME);
+        fprintf(stderr, "  sudo %s limit set <pid> <upload> <download>\n", PROGRAM_NAME);
         exit(EXIT_FAILURE);
     }
 
@@ -127,8 +168,15 @@ static void cmd_limit_set(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Limiting PID %d to %u kbps upload", pid, upload_kbps);
-    if (download_kbps > 0) {
+    printf("Limiting PID %d to ", pid);
+    if (upload_kbps == RATELIMIT_UNLIMITED) {
+        printf("unlimited upload");
+    } else {
+        printf("%u kbps upload", upload_kbps);
+    }
+    if (download_kbps == RATELIMIT_UNLIMITED) {
+        printf(", unlimited download");
+    } else {
         printf(", %u kbps download", download_kbps);
     }
     printf("\n");
@@ -267,7 +315,7 @@ static void cmd_clean(int argc, char *argv[]) {
 static const command commands[] = {
     {"list", "List processes with network connections", cmd_list},
     {"limit", "Limit bandwidth for a process", cmd_limit},
-    {"clean", "Clean up all rate limits and cgroups", cmd_clean},
+    {"clean", "Clean up all rate limits", cmd_clean},
     {"help", "Display this help message", cmd_help},
 };
 

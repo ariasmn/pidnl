@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#define RATELIMIT_UNLIMITED UINT32_MAX
+
 typedef enum {
     RATELIMIT_OK = 0,
     RATELIMIT_INVALID_PID,

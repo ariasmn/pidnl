@@ -83,6 +83,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     int map_fd, err;
     __u64 upload_bps, download_bps;
     ratelimit_code ret;
+    int upload_attached = 0;
 
     skel = ratelimit_bpf__open();
     if (!skel) {
@@ -95,39 +96,52 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     }
 
     map_fd = bpf_map__fd(skel->maps.rate_limits);
-    upload_bps = (__u64)config.upload_kbps * 1000 / 8;
-    download_bps = (__u64)config.download_kbps * 1000 / 8;
 
-    err = bpf_map_update_elem(map_fd, &DIRECTION_UPLOAD, &upload_bps, 0);
-    if (!err) {
+    if (config.upload_kbps != RATELIMIT_UNLIMITED) {
+        upload_bps = (__u64)config.upload_kbps * 1000 / 8;
+        err = bpf_map_update_elem(map_fd, &DIRECTION_UPLOAD, &upload_bps, 0);
+        if (err) {
+            ratelimit_bpf__destroy(skel);
+            return RATELIMIT_BPF_LOAD;
+        }
+
+        ret = bpf_prog_attach(
+            bpf_program__fd(skel->progs.egress_rate_limit),
+            limiter->cgroup_fd,
+            BPF_CGROUP_INET_EGRESS,
+            0
+        );
+        if (ret) {
+            ratelimit_bpf__destroy(skel);
+            return RATELIMIT_BPF_ATTACH;
+        }
+        upload_attached = 1;
+    }
+
+    if (config.download_kbps != RATELIMIT_UNLIMITED) {
+        download_bps = (__u64)config.download_kbps * 1000 / 8;
         err = bpf_map_update_elem(map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0);
-    }
-    if (err) {
-        ratelimit_bpf__destroy(skel);
-        return RATELIMIT_BPF_LOAD;
-    }
+        if (err) {
+            if (upload_attached) {
+                bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
+            }
+            ratelimit_bpf__destroy(skel);
+            return RATELIMIT_BPF_LOAD;
+        }
 
-    ret = bpf_prog_attach(
-        bpf_program__fd(skel->progs.egress_rate_limit),
-        limiter->cgroup_fd,
-        BPF_CGROUP_INET_EGRESS,
-        0
-    );
-    if (ret) {
-        ratelimit_bpf__destroy(skel);
-        return RATELIMIT_BPF_ATTACH;
-    }
-
-    ret = bpf_prog_attach(
-        bpf_program__fd(skel->progs.ingress_rate_limit),
-        limiter->cgroup_fd,
-        BPF_CGROUP_INET_INGRESS,
-        0
-    );
-    if (ret) {
-        bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
-        ratelimit_bpf__destroy(skel);
-        return RATELIMIT_BPF_ATTACH;
+        ret = bpf_prog_attach(
+            bpf_program__fd(skel->progs.ingress_rate_limit),
+            limiter->cgroup_fd,
+            BPF_CGROUP_INET_INGRESS,
+            0
+        );
+        if (ret) {
+            if (upload_attached) {
+                bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
+            }
+            ratelimit_bpf__destroy(skel);
+            return RATELIMIT_BPF_ATTACH;
+        }
     }
 
     limiter->skel = skel;
