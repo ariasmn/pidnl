@@ -20,7 +20,7 @@ check-deps:
 	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
 	@which valgrind >/dev/null 2>&1 || (echo "valgrind: MISSING" && exit 1)
 
-dev: check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
+dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
 
@@ -45,7 +45,7 @@ TEST_RATELIMIT_SRC = tests/test_ratelimit.c
 TEST_RATELIMIT_BIN = tests/test_ratelimit
 TEST_RATELIMIT_OBJ = tests/ratelimit_test.o
 
-test: $(BPF_SKEL)
+test: clean $(BPF_SKEL)
 	@set -e; \
 	mkdir -p tests; \
 	cleanup() { rm -f $(TEST_BIN) $(TEST_OBJ) $(TEST_RATELIMIT_BIN) $(TEST_RATELIMIT_OBJ); }; \
@@ -73,7 +73,7 @@ test: $(BPF_SKEL)
 	./tests/test_discovery; \
 	./tests/test_ratelimit
 
-valgrind: $(BPF_SKEL)
+valgrind: clean $(BPF_SKEL)
 	@mkdir -p tests; \
 	cleanup() { rm -f $(TEST_BIN) $(TEST_OBJ) $(TEST_RATELIMIT_BIN) $(TEST_RATELIMIT_OBJ); }; \
 	trap cleanup EXIT; \

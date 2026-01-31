@@ -17,10 +17,10 @@ static const char *program_usage = "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [A
                                    "  -h, --help          Display this help message";
 
 static const char *limit_usage =
-    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> [<download_kbps>]\n"
+    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> <download_kbps>\n"
     "       " PROGRAM_NAME " limit unset <pid>\n\n"
     "Commands:\n"
-    "  set <pid> <upload> [<download>]  Limit bandwidth for a process\n"
+    "  set <pid> <upload> <download>    Limit bandwidth for a process\n"
     "  unset <pid>                      Remove rate limit for a process\n\n"
     "Examples:\n"
     "  " PROGRAM_NAME " limit set 12345 1000 2000\n"
@@ -31,12 +31,9 @@ static const char *clean_usage =
     "Clean up all rate limits and cgroups created by " PROGRAM_NAME ".\n\n"
     "Options:\n"
     "  --yes, -y  Skip confirmation prompt\n\n"
-    "This will:\n"
-    "  - Remove all rate limits from processes\n"
-    "  - Delete all child cgroups\n"
-    "  - Delete the parent 'strait' cgroup";
+    "This will: remove all rate limits from processes\n";
 
-typedef void (*cmd_handler)(int argc, char *argv[]);
+    typedef void(*cmd_handler)(int argc, char *argv[]);
 
 typedef struct {
     const char *name;
@@ -92,7 +89,7 @@ static void cmd_limit_set(int argc, char *argv[]) {
         }
     }
 
-    if (help_shown || argc < 2) {
+    if (help_shown || argc < 3) {
         printf("%s\n", limit_usage);
         exit(EXIT_SUCCESS);
     }
@@ -109,7 +106,7 @@ static void cmd_limit_set(int argc, char *argv[]) {
     if (geteuid() != 0) {
         fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
         fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s limit set <pid> <upload> [<download>]\n", PROGRAM_NAME);
+        fprintf(stderr, "  sudo %s limit set <pid> <upload> <download>\n", PROGRAM_NAME);
         exit(EXIT_FAILURE);
     }
 
@@ -267,7 +264,7 @@ static void cmd_clean(int argc, char *argv[]) {
 static const command commands[] = {
     {"list", "List processes with network connections", cmd_list},
     {"limit", "Limit bandwidth for a process", cmd_limit},
-    {"clean", "Clean up all rate limits and cgroups", cmd_clean},
+    {"clean", "Clean up all rate limits", cmd_clean},
     {"help", "Display this help message", cmd_help},
 };
 
