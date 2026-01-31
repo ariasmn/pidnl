@@ -236,9 +236,7 @@ static void cmd_clean(int argc, char *argv[]) {
     }
 
     if (!skip_confirmation) {
-        printf(
-            "This will remove all rate limits created by " PROGRAM_NAME ".\n"
-        );
+        printf("This will remove all rate limits created by " PROGRAM_NAME ".\n");
         printf("Are you sure you want to continue? [y/N] ");
 
         int ch = getchar();
