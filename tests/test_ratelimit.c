@@ -194,6 +194,9 @@ static void test_limit_process_bandwidth(void **state) {
     expect_value(__wrap_cgroup_attach_task_pid, pid, 1234);
     will_return(__wrap_cgroup_attach_task_pid, 0);
 
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
+    will_return(__wrap_open, 20);
+
     will_return(__wrap_bpf_object__open_skeleton, 0);
     will_return(__wrap_bpf_object__load_skeleton, 0);
     will_return(__wrap_bpf_map__fd, 100);
@@ -212,8 +215,79 @@ static void test_limit_process_bandwidth(void **state) {
     expect_value(__wrap_bpf_prog_attach, type, BPF_CGROUP_INET_INGRESS);
     will_return(__wrap_bpf_prog_attach, 0);
 
+    ratelimit_code result = limit_process_bandwidth(test_pid, config);
+
+    assert_int_equal(result, RATELIMIT_OK);
+}
+
+static void test_limit_process_bandwidth_upload_unlimited(void **state) {
+    (void)state;
+
+    pid_t test_pid = 1234;
+    rate_limit_config config = {.upload_kbps = RATELIMIT_UNLIMITED, .download_kbps = 2000};
+
+    expect_string(__wrap_cgroup_new_cgroup, name, "strait");
+    will_return(__wrap_cgroup_new_cgroup, (void *)0x1000);
+    will_return(__wrap_cgroup_create_cgroup, 0);
+
+    expect_string(__wrap_cgroup_new_cgroup, name, "strait/1234");
+    will_return(__wrap_cgroup_new_cgroup, (void *)0x2000);
+    will_return(__wrap_cgroup_create_cgroup, 0);
+
+    expect_value(__wrap_cgroup_attach_task_pid, cg, (void *)0x2000);
+    expect_value(__wrap_cgroup_attach_task_pid, pid, 1234);
+    will_return(__wrap_cgroup_attach_task_pid, 0);
+
     expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
     will_return(__wrap_open, 20);
+
+    will_return(__wrap_bpf_object__open_skeleton, 0);
+    will_return(__wrap_bpf_object__load_skeleton, 0);
+    will_return(__wrap_bpf_map__fd, 100);
+    expect_value(__wrap_bpf_map_update_elem, fd, 100);
+    will_return(__wrap_bpf_map_update_elem, 0);
+    will_return(__wrap_bpf_program__fd, 102);
+    expect_value(__wrap_bpf_prog_attach, prog_fd, 102);
+    expect_value(__wrap_bpf_prog_attach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_attach, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_attach, 0);
+
+    ratelimit_code result = limit_process_bandwidth(test_pid, config);
+
+    assert_int_equal(result, RATELIMIT_OK);
+}
+
+static void test_limit_process_bandwidth_download_unlimited(void **state) {
+    (void)state;
+
+    pid_t test_pid = 1234;
+    rate_limit_config config = {.upload_kbps = 1000, .download_kbps = RATELIMIT_UNLIMITED};
+
+    expect_string(__wrap_cgroup_new_cgroup, name, "strait");
+    will_return(__wrap_cgroup_new_cgroup, (void *)0x1000);
+    will_return(__wrap_cgroup_create_cgroup, 0);
+
+    expect_string(__wrap_cgroup_new_cgroup, name, "strait/1234");
+    will_return(__wrap_cgroup_new_cgroup, (void *)0x2000);
+    will_return(__wrap_cgroup_create_cgroup, 0);
+
+    expect_value(__wrap_cgroup_attach_task_pid, cg, (void *)0x2000);
+    expect_value(__wrap_cgroup_attach_task_pid, pid, 1234);
+    will_return(__wrap_cgroup_attach_task_pid, 0);
+
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
+    will_return(__wrap_open, 20);
+
+    will_return(__wrap_bpf_object__open_skeleton, 0);
+    will_return(__wrap_bpf_object__load_skeleton, 0);
+    will_return(__wrap_bpf_map__fd, 100);
+    expect_value(__wrap_bpf_map_update_elem, fd, 100);
+    will_return(__wrap_bpf_map_update_elem, 0);
+    will_return(__wrap_bpf_program__fd, 101);
+    expect_value(__wrap_bpf_prog_attach, prog_fd, 101);
+    expect_value(__wrap_bpf_prog_attach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_attach, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_attach, 0);
 
     ratelimit_code result = limit_process_bandwidth(test_pid, config);
 
@@ -334,6 +408,8 @@ int main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_ratelimit_init_success),
         cmocka_unit_test(test_limit_process_bandwidth),
+        cmocka_unit_test(test_limit_process_bandwidth_upload_unlimited),
+        cmocka_unit_test(test_limit_process_bandwidth_download_unlimited),
         cmocka_unit_test(test_close_rate_limiter_handle_valid),
         cmocka_unit_test(test_unregister_rate_limiter_by_pid_success),
         cmocka_unit_test(test_ratelimit_code_string),
