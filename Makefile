@@ -50,13 +50,13 @@ test: clean $(BPF_SKEL)
 	mkdir -p tests 2>/dev/null; \
 	cleanup() { rm -f $(TEST_BIN) $(TEST_OBJ) $(TEST_RATELIMIT_BIN) $(TEST_RATELIMIT_OBJ) 2>/dev/null; }; \
 	trap cleanup EXIT; \
-	$(CC) $(TEST_CFLAGS) -I. -c $(LIBSRC)/discovery.c -o $(TEST_OBJ) 2>/dev/null; \
-	$(CC) $(TEST_CFLAGS) -I$(LIBSRC) -I. -c $(LIBSRC)/ratelimit.c -o $(TEST_RATELIMIT_OBJ) 2>/dev/null; \
+	$(CC) $(TEST_CFLAGS) -I. -c $(LIBSRC)/discovery.c -o $(TEST_OBJ); \
+	$(CC) $(TEST_CFLAGS) -I$(LIBSRC) -I. -c $(LIBSRC)/ratelimit.c -o $(TEST_RATELIMIT_OBJ); \
 	$(CC) $(TEST_CFLAGS) -I. $(TEST_SRC) $(TEST_OBJ) -o $(TEST_BIN) \
 		-Wl,--wrap=socket -Wl,--wrap=bind -Wl,--wrap=close -Wl,--wrap=sendmsg \
 		-Wl,--wrap=recvmsg -Wl,--wrap=opendir -Wl,--wrap=readdir -Wl,--wrap=closedir \
 		-Wl,--wrap=readlink -Wl,--wrap=fopen -Wl,--wrap=fgets -Wl,--wrap=fclose \
-		-lcmocka -pie 2>/dev/null; \
+		-lcmocka -pie; \
 	$(CC) $(TEST_CFLAGS) -I$(LIBSRC) -I. $(TEST_RATELIMIT_SRC) $(TEST_RATELIMIT_OBJ) -o $(TEST_RATELIMIT_BIN) \
 		-Wl,--wrap=cgroup_init -Wl,--wrap=cgroup_new_cgroup -Wl,--wrap=cgroup_create_cgroup \
 		-Wl,--wrap=cgroup_delete_cgroup -Wl,--wrap=cgroup_attach_task_pid -Wl,--wrap=cgroup_get_cgroup \
@@ -69,9 +69,9 @@ test: clean $(BPF_SKEL)
 		-Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
 		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach \
 		-Wl,--wrap=ratelimit_bpf__destroy \
-		-lcmocka -lbpf -lcgroup -pie 2>/dev/null; \
-	./tests/test_discovery >/dev/null 2>&1; \
-	./tests/test_ratelimit >/dev/null 2>&1
+		-lcmocka -lbpf -lcgroup -pie; \
+	./tests/test_discovery; \
+	./tests/test_ratelimit
 
 valgrind: clean $(BPF_SKEL)
 	@mkdir -p tests 2>/dev/null; \

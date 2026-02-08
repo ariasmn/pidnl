@@ -197,6 +197,13 @@ static void test_limit_process_bandwidth(void **state) {
     expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
     will_return(__wrap_open, 20);
 
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+
     will_return(__wrap_bpf_object__open_skeleton, 0);
     will_return(__wrap_bpf_object__load_skeleton, 0);
     will_return(__wrap_bpf_map__fd, 100);
@@ -241,6 +248,14 @@ static void test_limit_process_bandwidth_upload_unlimited(void **state) {
     expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
     will_return(__wrap_open, 20);
 
+    // Detach any existing BPF programs before attaching new ones
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+
     will_return(__wrap_bpf_object__open_skeleton, 0);
     will_return(__wrap_bpf_object__load_skeleton, 0);
     will_return(__wrap_bpf_map__fd, 100);
@@ -277,6 +292,14 @@ static void test_limit_process_bandwidth_download_unlimited(void **state) {
 
     expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
     will_return(__wrap_open, 20);
+
+    // Detach any existing BPF programs before attaching new ones
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
+    expect_value(__wrap_bpf_prog_detach, target_fd, 20);
+    expect_value(__wrap_bpf_prog_detach, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_detach, 0);
 
     will_return(__wrap_bpf_object__open_skeleton, 0);
     will_return(__wrap_bpf_object__load_skeleton, 0);
