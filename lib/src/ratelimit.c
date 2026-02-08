@@ -207,6 +207,13 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     limiter->cg = child;
     limiter->cgroup_fd = cgroup_fd;
 
+    // Detach any existing BPF programs before attaching new ones
+    // This handles the case where limits are changed (e.g., from limited to unlimited)
+    // TODO: Seems to works fine even if there's no BPF attached, I need to double check
+    // if this is costly in terms of perfomance, although it doesn't seem like so.
+    bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
+    bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
+
     err = attach_bpf_programs(limiter, config);
     if (err != RATELIMIT_OK) {
         delete_cgroup(limiter->cg, limiter->cgroup_fd);
