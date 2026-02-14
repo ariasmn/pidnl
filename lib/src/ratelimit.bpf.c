@@ -68,7 +68,7 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
 }
 
 SEC("cgroup/skb")
-int egress_rate_limit(struct __sk_buff *skb) {
+int egress_rl(struct __sk_buff *skb) {
     __u32 key = DIRECTION_UPLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
@@ -78,7 +78,7 @@ int egress_rate_limit(struct __sk_buff *skb) {
 }
 
 SEC("cgroup/skb")
-int ingress_rate_limit(struct __sk_buff *skb) {
+int ingress_rl(struct __sk_buff *skb) {
     __u32 key = DIRECTION_DOWNLOAD;
     __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
