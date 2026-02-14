@@ -41,18 +41,52 @@ typedef struct {
     cmd_handler handler;
 } command;
 
+static void format_limit(char *buf, size_t size, uint64_t bps) {
+    if (bps == 0) {
+        snprintf(buf, size, "-");
+    } else {
+        // Convert BPS to KBPS (BPS = KBPS * 1000 / 8, so KBPS = BPS * 8 / 1000)
+        uint64_t kbps = (bps * 8) / 1000;
+        snprintf(buf, size, "%lu", (unsigned long)kbps);
+    }
+}
+
 static void print_process_list(process_list *list) {
-    printf("%-8s %-20s %-10s %-10s %s\n", "PID", "NAME", "TCP", "UDP", "EXECUTABLE");
-    printf("%-8s %-20s %-10s %-10s %s\n", "---", "----", "---", "---", "----------");
+    printf(
+        "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
+        "PID",
+        "NAME",
+        "TCP",
+        "UDP",
+        "UP(KBPS)",
+        "DOWN(KBPS)",
+        "EXECUTABLE"
+    );
+    printf(
+        "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
+        "---",
+        "----",
+        "---",
+        "---",
+        "--------",
+        "----------",
+        "----------"
+    );
 
     for (size_t i = 0; i < list->count; i++) {
         process_info *proc = &list->processes[i];
+        char upload_str[16];
+        char download_str[16];
+        format_limit(upload_str, sizeof(upload_str), proc->upload_limit);
+        format_limit(download_str, sizeof(download_str), proc->download_limit);
         printf(
-            "%-8d %-20s %-10s %-10s %s\n",
+            "%-8d %-20s %-10s %-10s %-12s %-12s %s\n",
             proc->pid,
             proc->process_name,
             proc->has_tcp ? "Yes" : "No",
             proc->has_udp ? "Yes" : "No",
+            upload_str,
+            download_str,
             proc->exe_path[0] ? proc->exe_path : "(unknown)"
         );
     }
@@ -73,6 +107,15 @@ static void cmd_list(int argc, char *argv[]) {
             discovery_code_string(err)
         );
         exit(EXIT_FAILURE);
+    }
+
+    // Query rate limits for each process (requires root, fails silently otherwise)
+    for (size_t i = 0; i < list->count; i++) {
+        get_rate_limits_from_cgroup(
+            list->processes[i].pid,
+            &list->processes[i].upload_limit,
+            &list->processes[i].download_limit
+        );
     }
 
     print_process_list(list);

@@ -3,7 +3,6 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
 #include <linux/limits.h>
@@ -328,6 +327,108 @@ ratelimit_code ratelimit_cleanup_all(void) {
     cgroup_free(&cg);
 
     return RATELIMIT_OK;
+}
+
+static int
+read_limit_from_cgroup_progs(int cgroup_fd, enum bpf_attach_type attach_type, uint64_t *limit) {
+    *limit = 0;
+
+    __u32 prog_ids[16];
+    __u32 attach_flags[16];
+    LIBBPF_OPTS(bpf_prog_query_opts, opts);
+
+    opts.prog_cnt = 16;
+    opts.prog_ids = prog_ids;
+    opts.prog_attach_flags = attach_flags;
+
+    int ret = bpf_prog_query_opts(cgroup_fd, attach_type, &opts);
+    if (ret < 0 || opts.prog_cnt == 0) {
+        return -1;
+    }
+
+    // Get the first attached program
+    int prog_fd = bpf_prog_get_fd_by_id(prog_ids[0]);
+    if (prog_fd < 0) {
+        return -1;
+    }
+
+    // Get program info to find map IDs
+    struct bpf_prog_info info = {};
+    __u32 len = sizeof(info);
+
+    ret = bpf_prog_get_info_by_fd(prog_fd, &info, &len);
+    if (ret < 0 || info.nr_map_ids == 0) {
+        close(prog_fd);
+        return -1;
+    }
+
+    // Allocate array for map IDs
+    __u32 map_ids[info.nr_map_ids];
+    memset(&info, 0, sizeof(info));
+    info.nr_map_ids = sizeof(map_ids) / sizeof(map_ids[0]);
+    info.map_ids = (__u64)(unsigned long)map_ids;
+    len = sizeof(info);
+
+    ret = bpf_prog_get_info_by_fd(prog_fd, &info, &len);
+    close(prog_fd);
+
+    if (ret < 0) {
+        return -1;
+    }
+
+    // Try to read from each map
+    for (__u32 i = 0; i < info.nr_map_ids; i++) {
+        int map_fd = bpf_map_get_fd_by_id(map_ids[i]);
+        if (map_fd < 0) {
+            continue;
+        }
+
+        // Get map info to verify it's the right type
+        struct bpf_map_info map_info = {};
+        __u32 map_info_len = sizeof(map_info);
+        ret = bpf_map_get_info_by_fd(map_fd, &map_info, &map_info_len);
+
+        if (ret == 0 && map_info.type == BPF_MAP_TYPE_ARRAY && map_info.max_entries == 2) {
+            // This looks like our rate_limits map
+            __u32 key = (attach_type == BPF_CGROUP_INET_EGRESS) ? 0 : 1;
+            __u64 value;
+            if (bpf_map_lookup_elem(map_fd, &key, &value) == 0) {
+                *limit = value;
+                close(map_fd);
+                return 0;
+            }
+        }
+
+        close(map_fd);
+    }
+
+    return -1;
+}
+
+int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download) {
+    *upload = 0;
+    *download = 0;
+
+    if (pid <= 0) {
+        return -1;
+    }
+
+    char name[64];
+    snprintf(name, sizeof(name), "%s/%d", CGROUP_NAME, pid);
+
+    int cgroup_fd = open_cgroup_fd(name);
+    if (cgroup_fd < 0) {
+        return -1;
+    }
+
+    // Query egress programs for upload limit
+    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_EGRESS, upload);
+
+    // Query ingress programs for download limit
+    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_INGRESS, download);
+
+    close(cgroup_fd);
+    return 0;
 }
 
 const char *ratelimit_code_string(ratelimit_code code) {
