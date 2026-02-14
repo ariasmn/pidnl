@@ -68,6 +68,8 @@ test: clean $(BPF_SKEL)
 		-Wl,--wrap=bpf_object__destroy_skeleton \
 		-Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
 		-Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach \
+		-Wl,--wrap=bpf_prog_query_opts -Wl,--wrap=bpf_prog_get_fd_by_id -Wl,--wrap=bpf_prog_get_info_by_fd \
+		-Wl,--wrap=bpf_map_get_fd_by_id -Wl,--wrap=bpf_map_get_info_by_fd -Wl,--wrap=bpf_map_lookup_elem \
 		-Wl,--wrap=ratelimit_bpf__destroy \
 		-lcmocka -lbpf -lcgroup -pie; \
 	./tests/test_discovery; \
@@ -95,6 +97,8 @@ valgrind: clean $(BPF_SKEL)
 	        -Wl,--wrap=bpf_object__destroy_skeleton \
 	        -Wl,--wrap=bpf_map__fd -Wl,--wrap=bpf_program__fd -Wl,--wrap=bpf_map_update_elem \
 	        -Wl,--wrap=bpf_prog_attach -Wl,--wrap=bpf_prog_detach \
+	        -Wl,--wrap=bpf_prog_query_opts -Wl,--wrap=bpf_prog_get_fd_by_id -Wl,--wrap=bpf_prog_get_info_by_fd \
+	        -Wl,--wrap=bpf_map_get_fd_by_id -Wl,--wrap=bpf_map_get_info_by_fd -Wl,--wrap=bpf_map_lookup_elem \
 	        -Wl,--wrap=ratelimit_bpf__destroy \
 	        -lcmocka -lbpf -lcgroup -pie 2>/dev/null; \
 	valgrind --log-fd=3 --leak-check=full --show-leak-kinds=all \

@@ -4,9 +4,11 @@
 #include <cmocka.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <errno.h>
 #include <linux/limits.h>
 #include <linux/bpf.h>
+#include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <libcgroup.h>
 #include <libcgroup/iterators.h>
@@ -101,6 +103,85 @@ int __wrap_bpf_prog_attach(int prog_fd, int target_fd, int type, unsigned int fl
 int __wrap_bpf_prog_detach(int target_fd, int type) {
     check_expected(target_fd);
     check_expected(type);
+    return (int)mock();
+}
+
+int __wrap_bpf_prog_query_opts(
+    int target_fd, enum bpf_attach_type type, struct bpf_prog_query_opts *opts
+) {
+    check_expected(target_fd);
+    check_expected(type);
+
+    __u32 prog_cnt = (uintptr_t)mock();
+    if (opts) {
+        opts->prog_cnt = prog_cnt;
+        if (prog_cnt > 0 && opts->prog_ids) {
+            opts->prog_ids[0] = (uintptr_t)mock();
+        }
+    }
+
+    return (int)mock();
+}
+
+int __wrap_bpf_prog_get_fd_by_id(__u32 id) {
+    check_expected(id);
+    return (int)mock();
+}
+
+int __wrap_bpf_prog_get_info_by_fd(int prog_fd, struct bpf_prog_info *info, __u32 *info_len) {
+    (void)info_len;
+    check_expected(prog_fd);
+
+    const char *name = (const char *)mock();
+    __u32 map_cnt = (uintptr_t)mock();
+
+    if (info) {
+        void *map_ids_ptr = (void *)(uintptr_t)info->map_ids;
+        strncpy(info->name, name, BPF_OBJ_NAME_LEN - 1);
+        info->name[BPF_OBJ_NAME_LEN - 1] = '\0';
+        info->nr_map_ids = map_cnt;
+        info->map_ids = (uintptr_t)map_ids_ptr;
+
+        if (map_ids_ptr && map_cnt > 0) {
+            __u32 *map_ids = map_ids_ptr;
+            for (__u32 i = 0; i < map_cnt; i++) {
+                map_ids[i] = (uintptr_t)mock();
+            }
+        }
+    }
+
+    return (int)mock();
+}
+
+int __wrap_bpf_map_get_fd_by_id(__u32 id) {
+    check_expected(id);
+    return (int)mock();
+}
+
+int __wrap_bpf_map_get_info_by_fd(int fd, struct bpf_map_info *info, __u32 *info_len) {
+    (void)info_len;
+    check_expected(fd);
+
+    const char *name = (const char *)mock();
+    if (info) {
+        strncpy(info->name, name, BPF_OBJ_NAME_LEN - 1);
+        info->name[BPF_OBJ_NAME_LEN - 1] = '\0';
+    }
+
+    return (int)mock();
+}
+
+int __wrap_bpf_map_lookup_elem(int fd, const void *key, void *value) {
+    check_expected(fd);
+    __u32 key_value = key ? *(const __u32 *)key : 0;
+    check_expected(key_value);
+
+    if (value) {
+        *(__u64 *)value = (uintptr_t)mock();
+    } else {
+        (void)mock();
+    }
+
     return (int)mock();
 }
 
@@ -317,6 +398,75 @@ static void test_limit_process_bandwidth_download_unlimited(void **state) {
     assert_int_equal(result, RATELIMIT_OK);
 }
 
+static void test_get_rate_limits_from_cgroup_success(void **state) {
+    (void)state;
+
+    pid_t test_pid = 1234;
+    uint64_t upload = 0;
+    uint64_t download = 0;
+
+    expect_string(__wrap_open, pathname, "/sys/fs/cgroup/strait/1234");
+    will_return(__wrap_open, 20);
+
+    expect_value(__wrap_bpf_prog_query_opts, target_fd, 20);
+    expect_value(__wrap_bpf_prog_query_opts, type, BPF_CGROUP_INET_EGRESS);
+    will_return(__wrap_bpf_prog_query_opts, 1);
+    will_return(__wrap_bpf_prog_query_opts, 111);
+    will_return(__wrap_bpf_prog_query_opts, 0);
+
+    expect_value(__wrap_bpf_prog_get_fd_by_id, id, 111);
+    will_return(__wrap_bpf_prog_get_fd_by_id, 101);
+
+    expect_value(__wrap_bpf_prog_get_info_by_fd, prog_fd, 101);
+    will_return(__wrap_bpf_prog_get_info_by_fd, "egress_rl");
+    will_return(__wrap_bpf_prog_get_info_by_fd, 2);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 201);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 202);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 0);
+
+    expect_value(__wrap_bpf_map_get_fd_by_id, id, 201);
+    will_return(__wrap_bpf_map_get_fd_by_id, 301);
+    expect_value(__wrap_bpf_map_get_info_by_fd, fd, 301);
+    will_return(__wrap_bpf_map_get_info_by_fd, "rate_limits");
+    will_return(__wrap_bpf_map_get_info_by_fd, 0);
+    expect_value(__wrap_bpf_map_lookup_elem, fd, 301);
+    expect_value(__wrap_bpf_map_lookup_elem, key_value, 0);
+    will_return(__wrap_bpf_map_lookup_elem, 125000ULL);
+    will_return(__wrap_bpf_map_lookup_elem, 0);
+
+    expect_value(__wrap_bpf_prog_query_opts, target_fd, 20);
+    expect_value(__wrap_bpf_prog_query_opts, type, BPF_CGROUP_INET_INGRESS);
+    will_return(__wrap_bpf_prog_query_opts, 1);
+    will_return(__wrap_bpf_prog_query_opts, 112);
+    will_return(__wrap_bpf_prog_query_opts, 0);
+
+    expect_value(__wrap_bpf_prog_get_fd_by_id, id, 112);
+    will_return(__wrap_bpf_prog_get_fd_by_id, 102);
+
+    expect_value(__wrap_bpf_prog_get_info_by_fd, prog_fd, 102);
+    will_return(__wrap_bpf_prog_get_info_by_fd, "ingress_rl");
+    will_return(__wrap_bpf_prog_get_info_by_fd, 2);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 211);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 212);
+    will_return(__wrap_bpf_prog_get_info_by_fd, 0);
+
+    expect_value(__wrap_bpf_map_get_fd_by_id, id, 211);
+    will_return(__wrap_bpf_map_get_fd_by_id, 302);
+    expect_value(__wrap_bpf_map_get_info_by_fd, fd, 302);
+    will_return(__wrap_bpf_map_get_info_by_fd, "rate_limits");
+    will_return(__wrap_bpf_map_get_info_by_fd, 0);
+    expect_value(__wrap_bpf_map_lookup_elem, fd, 302);
+    expect_value(__wrap_bpf_map_lookup_elem, key_value, 1);
+    will_return(__wrap_bpf_map_lookup_elem, 250000ULL);
+    will_return(__wrap_bpf_map_lookup_elem, 0);
+
+    int result = get_rate_limits_from_cgroup(test_pid, &upload, &download);
+
+    assert_int_equal(result, 0);
+    assert_int_equal(upload, 125000ULL);
+    assert_int_equal(download, 250000ULL);
+}
+
 static void test_close_rate_limiter_handle_valid(void **state) {
     (void)state;
 
@@ -433,6 +583,7 @@ int main(void) {
         cmocka_unit_test(test_limit_process_bandwidth),
         cmocka_unit_test(test_limit_process_bandwidth_upload_unlimited),
         cmocka_unit_test(test_limit_process_bandwidth_download_unlimited),
+        cmocka_unit_test(test_get_rate_limits_from_cgroup_success),
         cmocka_unit_test(test_close_rate_limiter_handle_valid),
         cmocka_unit_test(test_unregister_rate_limiter_by_pid_success),
         cmocka_unit_test(test_ratelimit_code_string),
