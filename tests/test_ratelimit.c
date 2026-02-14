@@ -1,11 +1,9 @@
 #include <stdarg.h>
 #include <stddef.h>
-#include <setjmp.h>
 #include <cmocka.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <errno.h>
 #include <linux/limits.h>
 #include <linux/bpf.h>
 #include <bpf/bpf.h>
