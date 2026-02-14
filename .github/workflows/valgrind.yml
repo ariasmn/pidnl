@@ -11,6 +11,7 @@ jobs:
           sudo apt-get install -y \
             clang \
             linux-tools-generic \
+            bpftool \
             libbpf-dev \
             libnl-3-dev \
             libnl-route-3-dev \
