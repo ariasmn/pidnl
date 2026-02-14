@@ -11,7 +11,8 @@ jobs:
           sudo apt-get install -y \
             clang \
             linux-tools-generic \
-            bpftool \
+            linux-tools-azure \
+            linux-cloud-tools-azure \
             libbpf-dev \
             libnl-3-dev \
             libnl-route-3-dev \
