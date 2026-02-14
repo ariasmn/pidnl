@@ -7,9 +7,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Workaround for missing bpftool (bug #2117147)
         run: |
-          # Check if bpftool is already available
-          if ! command -v bpftool &> /dev/null; then
-            echo "bpftool not found, building from source..."
+          # Check if bpftool actually works (not just if wrapper exists)
+          if ! bpftool version &> /dev/null; then
+            echo "bpftool broken or missing, building from source..."
 
             KERNEL_VERSION=$(uname -r)
             KERNEL_MAJOR_MINOR=$(uname -r | awk -F'[.-]' '{print $1 "." $2}')
@@ -32,10 +32,11 @@ jobs:
             sudo mkdir -p ${BUILD_DIR}
             sudo install -m 0755 bpftool ${BUILD_DIR}/bpftool
 
-            # Verify
+            echo "bpftool installed successfully:"
             bpftool version
+          else
+            echo "bpftool already working"
           fi
-
       - name: Install dependencies
         run: |
           sudo apt-get update
