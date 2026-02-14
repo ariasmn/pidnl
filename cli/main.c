@@ -51,7 +51,8 @@ static void format_limit(char *buf, size_t size, uint64_t bps) {
     }
 }
 
-static void print_process_list(process_list *list) {
+static void
+print_process_list(process_list *list, uint64_t *upload_limits, uint64_t *download_limits) {
     printf(
         "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
         "PID",
@@ -77,8 +78,8 @@ static void print_process_list(process_list *list) {
         process_info *proc = &list->processes[i];
         char upload_str[16];
         char download_str[16];
-        format_limit(upload_str, sizeof(upload_str), proc->upload_limit);
-        format_limit(download_str, sizeof(download_str), proc->download_limit);
+        format_limit(upload_str, sizeof(upload_str), upload_limits[i]);
+        format_limit(download_str, sizeof(download_str), download_limits[i]);
         printf(
             "%-8d %-20s %-10s %-10s %-12s %-12s %s\n",
             proc->pid,
@@ -109,16 +110,23 @@ static void cmd_list(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Query rate limits for each process (requires root, fails silently otherwise)
-    for (size_t i = 0; i < list->count; i++) {
-        get_rate_limits_from_cgroup(
-            list->processes[i].pid,
-            &list->processes[i].upload_limit,
-            &list->processes[i].download_limit
-        );
+    uint64_t *upload_limits = calloc(list->count, sizeof(uint64_t));
+    uint64_t *download_limits = calloc(list->count, sizeof(uint64_t));
+    if (!upload_limits || !download_limits) {
+        fprintf(stderr, "%s: failed to allocate memory\n", PROGRAM_NAME);
+        destroy_process_list(list);
+        free(upload_limits);
+        free(download_limits);
+        exit(EXIT_FAILURE);
     }
 
-    print_process_list(list);
+    for (size_t i = 0; i < list->count; i++) {
+        get_rate_limits_from_cgroup(list->processes[i].pid, &upload_limits[i], &download_limits[i]);
+    }
+
+    print_process_list(list, upload_limits, download_limits);
+    free(upload_limits);
+    free(download_limits);
     destroy_process_list(list);
 }
 

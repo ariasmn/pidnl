@@ -22,8 +22,6 @@ typedef struct {
     int num_connections;
     int has_tcp;
     int has_udp;
-    uint64_t upload_limit;
-    uint64_t download_limit;
 } process_info;
 
 typedef struct {
