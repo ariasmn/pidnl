@@ -42,13 +42,8 @@ typedef struct {
 } command;
 
 static void format_limit(char *buf, size_t size, uint64_t bps) {
-    if (bps == 0) {
-        snprintf(buf, size, "-");
-    } else {
-        // Convert BPS to KBPS (BPS = KBPS * 1000 / 8, so KBPS = BPS * 8 / 1000)
-        uint64_t kbps = (bps * 8) / 1000;
-        snprintf(buf, size, "%lu", (unsigned long)kbps);
-    }
+    uint64_t kbps = (bps * 8) / 1000;
+    snprintf(buf, size, bps == 0 ? "-" : "%lu", (unsigned long)kbps);
 }
 
 static void
@@ -76,8 +71,8 @@ print_process_list(process_list *list, uint64_t *upload_limits, uint64_t *downlo
 
     for (size_t i = 0; i < list->count; i++) {
         process_info *proc = &list->processes[i];
-        char upload_str[16];
-        char download_str[16];
+        char upload_str[20];
+        char download_str[20];
         format_limit(upload_str, sizeof(upload_str), upload_limits[i]);
         format_limit(download_str, sizeof(download_str), download_limits[i]);
         printf(
