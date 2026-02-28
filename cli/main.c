@@ -193,13 +193,6 @@ static void cmd_limit_set(int argc, char *argv[]) {
 
     destroy_process_list(list);
 
-    if (geteuid() != 0) {
-        fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
-        fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s limit set <pid> <upload> <download>\n", PROGRAM_NAME);
-        exit(EXIT_FAILURE);
-    }
-
     rate_limit_config config = {.upload_kbps = upload_kbps, .download_kbps = download_kbps};
 
     ratelimit_code err = limit_process_bandwidth(pid, config);
@@ -247,13 +240,6 @@ static void cmd_limit_unset(int argc, char *argv[]) {
 
     if (pid <= 0) {
         fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    if (geteuid() != 0) {
-        fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
-        fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s limit unset <pid>\n", PROGRAM_NAME);
         exit(EXIT_FAILURE);
     }
 
@@ -342,13 +328,6 @@ static void cmd_clean(int argc, char *argv[]) {
             ;
     }
 
-    if (geteuid() != 0) {
-        fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
-        fprintf(stderr, "Try running with sudo:\n");
-        fprintf(stderr, "  sudo %s clean\n", PROGRAM_NAME);
-        exit(EXIT_FAILURE);
-    }
-
     ratelimit_code err = ratelimit_cleanup_all();
     if (err != RATELIMIT_OK) {
         fprintf(stderr, "%s: %s\n", PROGRAM_NAME, ratelimit_code_string(err));
@@ -422,6 +401,10 @@ int main(int argc, char *argv[]) {
 
     const command *cmd = find_command(argv[cmd_index]);
     if (cmd) {
+        if (strcmp(cmd->name, "help") != 0 && geteuid() != 0) {
+            fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
+            return EXIT_FAILURE;
+        }
         cmd->handler(argc - cmd_index, argv + cmd_index);
     } else {
         fprintf(stderr, "%s: unknown command '%s'\n", PROGRAM_NAME, argv[cmd_index]);
