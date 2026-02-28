@@ -41,18 +41,48 @@ typedef struct {
     cmd_handler handler;
 } command;
 
-static void print_process_list(process_list *list) {
-    printf("%-8s %-20s %-10s %-10s %s\n", "PID", "NAME", "TCP", "UDP", "EXECUTABLE");
-    printf("%-8s %-20s %-10s %-10s %s\n", "---", "----", "---", "---", "----------");
+static void format_limit(char *buf, size_t size, uint64_t bps) {
+    uint64_t kbps = (bps * 8) / 1000;
+    snprintf(buf, size, bps == 0 ? "-" : "%lu", (unsigned long)kbps);
+}
+
+static void
+print_process_list(process_list *list, uint64_t *upload_limits, uint64_t *download_limits) {
+    printf(
+        "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
+        "PID",
+        "NAME",
+        "TCP",
+        "UDP",
+        "UP(KBPS)",
+        "DOWN(KBPS)",
+        "EXECUTABLE"
+    );
+    printf(
+        "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
+        "---",
+        "----",
+        "---",
+        "---",
+        "--------",
+        "----------",
+        "----------"
+    );
 
     for (size_t i = 0; i < list->count; i++) {
         process_info *proc = &list->processes[i];
+        char upload_str[20];
+        char download_str[20];
+        format_limit(upload_str, sizeof(upload_str), upload_limits[i]);
+        format_limit(download_str, sizeof(download_str), download_limits[i]);
         printf(
-            "%-8d %-20s %-10s %-10s %s\n",
+            "%-8d %-20s %-10s %-10s %-12s %-12s %s\n",
             proc->pid,
             proc->process_name,
             proc->has_tcp ? "Yes" : "No",
             proc->has_udp ? "Yes" : "No",
+            upload_str,
+            download_str,
             proc->exe_path[0] ? proc->exe_path : "(unknown)"
         );
     }
@@ -75,7 +105,23 @@ static void cmd_list(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    print_process_list(list);
+    uint64_t *upload_limits = calloc(list->count, sizeof(uint64_t));
+    uint64_t *download_limits = calloc(list->count, sizeof(uint64_t));
+    if (!upload_limits || !download_limits) {
+        fprintf(stderr, "%s: failed to allocate memory\n", PROGRAM_NAME);
+        destroy_process_list(list);
+        free(upload_limits);
+        free(download_limits);
+        exit(EXIT_FAILURE);
+    }
+
+    for (size_t i = 0; i < list->count; i++) {
+        get_rate_limits_from_cgroup(list->processes[i].pid, &upload_limits[i], &download_limits[i]);
+    }
+
+    print_process_list(list, upload_limits, download_limits);
+    free(upload_limits);
+    free(download_limits);
     destroy_process_list(list);
 }
 

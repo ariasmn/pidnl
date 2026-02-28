@@ -3,6 +3,7 @@
 
 #include <linux/limits.h>
 #include <linux/taskstats.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 typedef enum {

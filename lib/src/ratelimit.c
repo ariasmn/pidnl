@@ -3,7 +3,6 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
 #include <linux/limits.h>
@@ -14,9 +13,12 @@
 #include <unistd.h>
 
 #define CGROUP_NAME "strait"
-
 static const unsigned int DIRECTION_UPLOAD = 0;
 static const unsigned int DIRECTION_DOWNLOAD = 1;
+
+static const char *EGRESS_PROG_NAME = "egress_rl";
+static const char *INGRESS_PROG_NAME = "ingress_rl";
+static const char *RATE_LIMITS_MAP_NAME = "rate_limits";
 
 struct rate_limiter {
     struct cgroup *cg;
@@ -106,10 +108,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
         }
 
         ret = bpf_prog_attach(
-            bpf_program__fd(skel->progs.egress_rate_limit),
-            limiter->cgroup_fd,
-            BPF_CGROUP_INET_EGRESS,
-            0
+            bpf_program__fd(skel->progs.egress_rl), limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS, 0
         );
         if (ret) {
             ratelimit_bpf__destroy(skel);
@@ -130,10 +129,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
         }
 
         ret = bpf_prog_attach(
-            bpf_program__fd(skel->progs.ingress_rate_limit),
-            limiter->cgroup_fd,
-            BPF_CGROUP_INET_INGRESS,
-            0
+            bpf_program__fd(skel->progs.ingress_rl), limiter->cgroup_fd, BPF_CGROUP_INET_INGRESS, 0
         );
         if (ret) {
             if (upload_attached) {
@@ -328,6 +324,94 @@ ratelimit_code ratelimit_cleanup_all(void) {
     cgroup_free(&cg);
 
     return RATELIMIT_OK;
+}
+
+static int
+read_limit_from_cgroup_progs(int cgroup_fd, enum bpf_attach_type attach_type, uint64_t *limit) {
+    *limit = 0;
+
+    // We only attach one program per attach type (detach + no ALLOW_MULTI).
+    __u32 prog_id = 0;
+    LIBBPF_OPTS(bpf_prog_query_opts, opts);
+    opts.prog_cnt = 1;
+    opts.prog_ids = &prog_id;
+
+    int ret = bpf_prog_query_opts(cgroup_fd, attach_type, &opts);
+    if (ret < 0 || opts.prog_cnt == 0) {
+        return -1;
+    }
+
+    const char *prog_name =
+        (attach_type == BPF_CGROUP_INET_EGRESS) ? EGRESS_PROG_NAME : INGRESS_PROG_NAME;
+
+    int prog_fd = bpf_prog_get_fd_by_id(prog_id);
+    if (prog_fd < 0) {
+        return -1;
+    }
+
+    struct bpf_prog_info pinfo = {};
+    __u32 map_ids[2]; // Same here, we should only have two maps at max.
+    __u32 plen = sizeof(pinfo);
+    pinfo.nr_map_ids = 2;
+    pinfo.map_ids = (__u64)(unsigned long)map_ids;
+
+    ret = bpf_prog_get_info_by_fd(prog_fd, &pinfo, &plen);
+    if (ret < 0 || strncmp(pinfo.name, prog_name, BPF_OBJ_NAME_LEN) != 0 || pinfo.nr_map_ids == 0) {
+        close(prog_fd);
+        return -1;
+    }
+
+    for (__u32 i = 0; i < pinfo.nr_map_ids; i++) {
+        int map_fd = bpf_map_get_fd_by_id(map_ids[i]);
+        if (map_fd < 0) {
+            continue;
+        }
+
+        struct bpf_map_info map_info = {};
+        __u32 map_info_len = sizeof(map_info);
+        if (bpf_map_get_info_by_fd(map_fd, &map_info, &map_info_len) == 0 &&
+            strncmp(map_info.name, RATE_LIMITS_MAP_NAME, BPF_OBJ_NAME_LEN) == 0) {
+            __u32 key =
+                (attach_type == BPF_CGROUP_INET_EGRESS) ? DIRECTION_UPLOAD : DIRECTION_DOWNLOAD;
+            __u64 value;
+            if (bpf_map_lookup_elem(map_fd, &key, &value) == 0) {
+                *limit = value;
+                close(map_fd);
+                close(prog_fd);
+                return 0;
+            }
+        }
+        close(map_fd);
+    }
+
+    close(prog_fd);
+    return -1;
+}
+
+int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download) {
+    *upload = 0;
+    *download = 0;
+
+    if (pid <= 0) {
+        return -1;
+    }
+
+    char name[64];
+    snprintf(name, sizeof(name), "%s/%d", CGROUP_NAME, pid);
+
+    int cgroup_fd = open_cgroup_fd(name);
+    if (cgroup_fd < 0) {
+        return -1;
+    }
+
+    // Query egress programs for upload limit
+    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_EGRESS, upload);
+
+    // Query ingress programs for download limit
+    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_INGRESS, download);
+
+    close(cgroup_fd);
+    return 0;
 }
 
 const char *ratelimit_code_string(ratelimit_code code) {
