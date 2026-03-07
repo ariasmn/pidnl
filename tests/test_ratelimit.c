@@ -184,6 +184,18 @@ int __wrap_bpf_map_lookup_elem(int fd, const void *key, void *value) {
     return (int)mock();
 }
 
+int __wrap_monitor_watch_pid(pid_t pid) {
+    (void)pid;
+    return 0;
+}
+
+int __wrap_monitor_unwatch_pid(pid_t pid) {
+    (void)pid;
+    return 0;
+}
+
+int __wrap_monitor_stop(void) { return 0; }
+
 int __wrap_open(const char *pathname, int flags, ...) {
     (void)flags;
     check_expected_ptr(pathname);

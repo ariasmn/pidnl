@@ -27,7 +27,7 @@ $(BPF_SKEL): $(BPF_OBJ)
 $(BPF_OBJ): $(BPF_SRC)
 	@$(CC) -O2 -target bpf -g -c $< -o $@
 
-$(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(CLI_OBJ)
+$(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
@@ -71,6 +71,7 @@ test: clean $(BPF_SKEL)
 		-Wl,--wrap=bpf_prog_query_opts -Wl,--wrap=bpf_prog_get_fd_by_id -Wl,--wrap=bpf_prog_get_info_by_fd \
 		-Wl,--wrap=bpf_map_get_fd_by_id -Wl,--wrap=bpf_map_get_info_by_fd -Wl,--wrap=bpf_map_lookup_elem \
 		-Wl,--wrap=ratelimit_bpf__destroy \
+		-Wl,--wrap=monitor_watch_pid -Wl,--wrap=monitor_unwatch_pid -Wl,--wrap=monitor_stop \
 		-lcmocka -lbpf -lcgroup -pie; \
 	./tests/test_discovery; \
 	./tests/test_ratelimit
