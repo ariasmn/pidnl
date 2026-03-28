@@ -104,14 +104,7 @@ static void cleanup_pid_slot(int slot) {
 
     pid_t pid = watched_pids[slot].pid;
 
-    // Clean up the cgroup and BPF programs
     unregister_rate_limiter_by_pid(pid);
-
-    close(watched_pids[slot].pidfd);
-    watched_pids[slot].active = 0;
-    watched_pids[slot].pid = 0;
-    watched_pids[slot].pidfd = -1;
-    watched_count--;
 }
 
 static int create_monitor_socket(void) {
@@ -199,9 +192,10 @@ void monitor_run(void) {
         exit(1);
     }
 
-    // Set up signal handling for clean shutdown
+    // Set up signal handling
     signal(SIGTERM, SIG_DFL);
     signal(SIGINT, SIG_DFL);
+    signal(SIGPIPE, SIG_IGN);
 
     while (running) {
         // Build poll array
