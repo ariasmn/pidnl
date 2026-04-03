@@ -20,7 +20,6 @@
 #endif
 
 #define MAX_WATCHED_PIDS 1024
-#define BUFFER_SIZE 256
 #define DAEMON_TIMEOUT_MS 5000
 
 struct pidfd_entry {
@@ -116,7 +115,6 @@ static int monitor_connect(void) {
 // Big function but breaking into smaller ones is just missdirection IMHO.
 static void monitor_run(void) {
     struct pollfd fds[MAX_WATCHED_PIDS + 2];
-    char buffer[BUFFER_SIZE];
 
     is_monitor_process = 1;
 
@@ -186,46 +184,19 @@ static void monitor_run(void) {
         if (fds[0].revents & POLLIN) {
             int client_fd = accept(monitor_socket, NULL, NULL);
             if (client_fd >= 0) {
-                ssize_t n = read(client_fd, buffer, sizeof(buffer) - 1);
-                if (n > 0) {
-                    buffer[n] = '\0';
-                    char *nl = strchr(buffer, '\n');
-                    if (nl)
-                        *nl = '\0';
+                struct monitor_cmd msg;
+                ssize_t n = read(client_fd, &msg, sizeof(msg));
+                int result = -1;
 
-                    // Parse command
-                    char response[BUFFER_SIZE];
-                    pid_t cmd_pid;
-                    if (strncmp(buffer, MONITOR_CMD_WATCH " ", strlen(MONITOR_CMD_WATCH " ")) ==
-                        0) {
-                        cmd_pid = atoi(buffer + strlen(MONITOR_CMD_WATCH " "));
-                        if (cmd_pid <= 0) {
-                            snprintf(response, sizeof(response), MONITOR_CMD_ERROR " Invalid PID");
-                        } else if (add_pid_to_watch(cmd_pid) < 0) {
-                            snprintf(
-                                response, sizeof(response), MONITOR_CMD_ERROR " Failed to watch"
-                            );
-                        } else {
-                            snprintf(response, sizeof(response), MONITOR_CMD_OK);
-                        }
-                    } else if (strncmp(
-                                   buffer, MONITOR_CMD_UNWATCH " ", strlen(MONITOR_CMD_UNWATCH " ")
-                               ) == 0) {
-                        cmd_pid = atoi(buffer + strlen(MONITOR_CMD_UNWATCH " "));
-                        if (cmd_pid <= 0) {
-                            snprintf(response, sizeof(response), MONITOR_CMD_ERROR " Invalid PID");
-                        } else if (remove_pid_from_watch(cmd_pid) < 0) {
-                            snprintf(response, sizeof(response), MONITOR_CMD_ERROR " Not watching");
-                        } else {
-                            snprintf(response, sizeof(response), MONITOR_CMD_OK);
-                        }
-                    } else {
-                        snprintf(response, sizeof(response), MONITOR_CMD_ERROR " Unknown command");
+                if (n == sizeof(msg)) {
+                    if (msg.cmd == CMD_WATCH) {
+                        result = add_pid_to_watch(msg.pid);
+                    } else if (msg.cmd == CMD_UNWATCH) {
+                        result = remove_pid_from_watch(msg.pid);
                     }
-
-                    write(client_fd, response, strlen(response));
-                    write(client_fd, "\n", 1);
                 }
+
+                write(client_fd, &result, sizeof(result));
                 close(client_fd);
             }
         }
@@ -317,13 +288,12 @@ static int monitor_ensure_running(void) {
 }
 
 // Send command to monitor, returns 0 on success
-static int send_command(const char *cmd, pid_t pid) {
+static int send_command(int cmd, pid_t pid) {
     if (is_monitor_process) {
-        if (strcmp(cmd, MONITOR_CMD_WATCH) == 0) {
+        if (cmd == CMD_WATCH)
             return add_pid_to_watch(pid);
-        } else if (strcmp(cmd, MONITOR_CMD_UNWATCH) == 0) {
+        if (cmd == CMD_UNWATCH)
             return remove_pid_from_watch(pid);
-        }
         return -1;
     }
 
@@ -332,28 +302,22 @@ static int send_command(const char *cmd, pid_t pid) {
         return -1;
     }
 
-    char buffer[BUFFER_SIZE];
-    snprintf(buffer, sizeof(buffer), "%s %d\n", cmd, pid);
-
-    if (write(fd, buffer, strlen(buffer)) < 0) {
+    struct monitor_cmd msg = {.cmd = cmd, .pid = pid};
+    if (write(fd, &msg, sizeof(msg)) < 0) {
         close(fd);
         return -1;
     }
 
-    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    int result = -1;
+    ssize_t n = read(fd, &result, sizeof(result));
     close(fd);
 
-    if (n <= 0) {
-        return -1;
-    }
-
-    buffer[n] = '\0';
-    return strncmp(buffer, MONITOR_CMD_OK, strlen(MONITOR_CMD_OK)) == 0 ? 0 : -1;
+    return (n == sizeof(result)) ? result : -1;
 }
 
-int monitor_watch_pid(pid_t pid) { return send_command(MONITOR_CMD_WATCH, pid); }
+int monitor_watch_pid(pid_t pid) { return send_command(CMD_WATCH, pid); }
 
-int monitor_unwatch_pid(pid_t pid) { return send_command(MONITOR_CMD_UNWATCH, pid); }
+int monitor_unwatch_pid(pid_t pid) { return send_command(CMD_UNWATCH, pid); }
 
 int monitor_stop(void) {
     int fd = monitor_connect();
