@@ -111,8 +111,7 @@ static int monitor_connect(void) {
 
     // Add timeout for the socket, in case the daemon disconnects the CLI doesn't hung.
     struct timeval tv = {
-        .tv_sec = DAEMON_TIMEOUT_MS / 1000,
-        .tv_usec = (DAEMON_TIMEOUT_MS % 1000) * 1000
+        .tv_sec = DAEMON_TIMEOUT_MS / 1000, .tv_usec = (DAEMON_TIMEOUT_MS % 1000) * 1000
     };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
