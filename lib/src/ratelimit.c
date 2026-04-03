@@ -1,4 +1,5 @@
 #include "ratelimit.h"
+#include "monitor.h"
 #include "ratelimit_bpf.skel.h"
 
 #include <bpf/bpf.h>
@@ -220,6 +221,9 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
 
     cgroup_free(&parent);
     close_rate_limiter_handle(limiter);
+
+    monitor_watch_pid(pid);
+
     return RATELIMIT_OK;
 }
 
@@ -240,6 +244,8 @@ ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
     struct cgroup *cg = NULL;
     int cgroup_fd;
     char name[64];
+
+    monitor_unwatch_pid(pid);
 
     build_cgroup_name(pid, name, sizeof(name));
 
@@ -322,6 +328,8 @@ ratelimit_code ratelimit_cleanup_all(void) {
         return RATELIMIT_LIBCG_DELETE;
     }
     cgroup_free(&cg);
+
+    monitor_stop();
 
     return RATELIMIT_OK;
 }

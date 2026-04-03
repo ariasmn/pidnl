@@ -26,7 +26,7 @@ $(BPF_SKEL): $(BPF_OBJ)
 $(BPF_OBJ): $(BPF_SRC)
 	@$(CC) -O2 -target bpf -g -I$(ARCH_INCLUDE) -c $< -o $@
 
-$(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(CLI_OBJ)
+$(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
