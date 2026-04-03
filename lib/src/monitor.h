@@ -9,6 +9,7 @@
 enum {
     CMD_WATCH = 1,
     CMD_UNWATCH = 2,
+    CMD_STOP = 3,
 };
 
 struct monitor_cmd {

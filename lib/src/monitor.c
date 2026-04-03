@@ -157,7 +157,8 @@ static void monitor_run(void) {
     signal(SIGPIPE, SIG_IGN);
 
     // Event loop
-    while (1) {
+    int running = 1;
+    while (running) {
         int nfds = 0;
 
         fds[nfds].fd = monitor_socket;
@@ -193,6 +194,9 @@ static void monitor_run(void) {
                         result = add_pid_to_watch(msg.pid);
                     } else if (msg.cmd == CMD_UNWATCH) {
                         result = remove_pid_from_watch(msg.pid);
+                    } else if (msg.cmd == CMD_STOP) {
+                        result = 0;
+                        running = 0;
                     }
                 }
 
@@ -325,6 +329,12 @@ int monitor_stop(void) {
         return 0;
     }
 
+    struct monitor_cmd msg = {.cmd = CMD_STOP};
+    write(fd, &msg, sizeof(msg));
+
+    int result;
+    ssize_t n = read(fd, &result, sizeof(result));
     close(fd);
-    return 0;
+
+    return (n == sizeof(result)) ? result : -1;
 }
