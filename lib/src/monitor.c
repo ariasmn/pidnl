@@ -33,7 +33,7 @@ static struct pidfd_entry watched_pids[MAX_WATCHED_PIDS];
 static int watched_count = 0;
 static int monitor_socket = -1;
 static int is_monitor_process = 0;
-static int ready_fd = -1;
+static int notify_parent_fd = -1;
 
 static int pidfd_open(pid_t pid, unsigned int flags) {
     return syscall(__NR_pidfd_open, pid, flags);
@@ -193,10 +193,10 @@ void monitor_run(void) {
     }
 
     // Signal parent that we're ready
-    if (ready_fd >= 0) {
-        write(ready_fd, "1", 1);
-        close(ready_fd);
-        ready_fd = -1;
+    if (notify_parent_fd >= 0) {
+        write(notify_parent_fd, "1", 1);
+        close(notify_parent_fd);
+        notify_parent_fd = -1;
     }
 
     // Set up signal handling
@@ -309,23 +309,23 @@ int monitor_ensure_running(void) {
     }
 
     // Monitor not running, start it
-    // Create pipe for synchronization
-    int pipefd[2];
-    if (pipe(pipefd) < 0) {
+    // Pipe for synchronizing parent and child
+    int child_ready_pipe[2]; // [0] = read end (parent), [1] = write end (child)
+    if (pipe(child_ready_pipe) < 0) {
         return -1;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
+        close(child_ready_pipe[0]);
+        close(child_ready_pipe[1]);
         return -1;
     }
 
     if (pid == 0) {
         // Child process - become monitor
-        close(pipefd[0]);
-        ready_fd = pipefd[1];
+        close(child_ready_pipe[0]);             // Child doesn't read
+        notify_parent_fd = child_ready_pipe[1]; // Child will write to signal readiness
         setsid();
 
         monitor_run();
@@ -333,19 +333,19 @@ int monitor_ensure_running(void) {
     }
 
     // Parent - close write end and wait for child to signal readiness
-    close(pipefd[1]);
+    close(child_ready_pipe[1]); // Parent doesn't write
 
-    // Use poll with timeout (5 seconds) to wait for readiness signal
-    struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN};
-    int ret = poll(&pfd, 1, 5000);
-    close(pipefd[0]);
+    // Block until child writes to pipe (signals socket is ready)
+    struct pollfd wait_for_child = {.fd = child_ready_pipe[0], .events = POLLIN};
+    int ret = poll(&wait_for_child, 1, 5000); // Timeout: 5 seconds
+    close(child_ready_pipe[0]);
 
     if (ret <= 0) {
         // Timeout or error - child didn't signal in time
         return -1;
     }
 
-    // Child is ready, try to connect
+    // Child is ready, connect to its socket
     fd = monitor_connect();
     return fd;
 }
