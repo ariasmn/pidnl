@@ -1,6 +1,7 @@
 CC = clang
 CFLAGS = -Wall -Wextra -Werror -g -fsanitize=address -fno-omit-frame-pointer
 LDFLAGS = -fsanitize=address
+ARCH_INCLUDE = /usr/include/$(shell $(CC) -print-multiarch 2>/dev/null || echo "$(shell uname -m)-linux-gnu")
 
 LIBSRC = lib/src
 CLI_OBJ = cli/main.o
@@ -23,7 +24,7 @@ $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
 
 $(BPF_OBJ): $(BPF_SRC)
-	@$(CC) -O2 -target bpf -g -c $< -o $@
+	@$(CC) -O2 -target bpf -g -I$(ARCH_INCLUDE) -c $< -o $@
 
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
