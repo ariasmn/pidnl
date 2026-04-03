@@ -38,16 +38,20 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
     struct rate_limit_state *state;
     __u64 now = bpf_ktime_get_ns();
     __u64 tokens_to_add;
-    __u64 elapsed_ns;
 
     state = bpf_map_lookup_elem(&rate_state, &direction);
     if (!state) {
         return 1;
     }
 
-    // Calculate tokens to add based on elapsed time
-    elapsed_ns = now - state->last_update_ns;
-    tokens_to_add = (limit_bps / 1000000) * (elapsed_ns / 1000);
+    // Calculate tokens to add based on elapsed time.
+    // Convert to microseconds first to avoid overflow at high rates,
+    // then cap at 1s to limit burst accumulation.
+    __u64 elapsed_us = (now - state->last_update_ns) / 1000;
+    if (elapsed_us > 1000000ULL) {
+        elapsed_us = 1000000ULL;
+    }
+    tokens_to_add = (limit_bps * elapsed_us) / 1000000ULL;
 
     state->tokens += tokens_to_add;
     state->last_update_ns = now;

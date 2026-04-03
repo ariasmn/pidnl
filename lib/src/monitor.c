@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -107,6 +108,13 @@ static int monitor_connect(void) {
         close(fd);
         return -1;
     }
+
+    // Add timeout for the socket, in case the daemon disconnects the CLI doesn't hung.
+    struct timeval tv = {
+        .tv_sec = DAEMON_TIMEOUT_MS / 1000,
+        .tv_usec = (DAEMON_TIMEOUT_MS % 1000) * 1000
+    };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     return fd;
 }
@@ -317,7 +325,7 @@ static monitor_code send_command(int cmd, pid_t pid) {
     close(fd);
 
     if (n != sizeof(result)) {
-        return MONITOR_READ;
+        return MONITOR_TIMEOUT;
     }
 
     return (monitor_code)result;

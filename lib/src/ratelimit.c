@@ -272,67 +272,48 @@ ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
 }
 
 ratelimit_code ratelimit_cleanup_all(void) {
-    void *handle = NULL;
-    struct cgroup_file_info info;
-    int base_level;
-    int ret;
-    struct cgroup *cg = NULL;
-
-    cg = cgroup_new_cgroup(CGROUP_NAME);
+    struct cgroup *cg = cgroup_new_cgroup(CGROUP_NAME);
     if (!cg) {
         return RATELIMIT_CLEANUP;
     }
-    ret = cgroup_get_cgroup(cg);
-    if (ret != 0) {
+    if (cgroup_get_cgroup(cg) != 0) {
         cgroup_free(&cg);
         return RATELIMIT_CLEANUP;
     }
 
     // Using "cpu" since I don't care about the controller being used, and I guess
     // this one should always exist.
-    ret = cgroup_walk_tree_begin("cpu", CGROUP_NAME, 0, &handle, &info, &base_level);
+    void *handle = NULL;
+    struct cgroup_file_info info;
+    int base_level;
+    int ret = cgroup_walk_tree_begin("cpu", CGROUP_NAME, 0, &handle, &info, &base_level);
     while (ret == 0) {
-        if (info.type == CGROUP_FILE_TYPE_DIR) {
-            const char *child_path = info.path;
-            // The first one that we get in the iterator is the parent, so we need to skip it.
-            if (!strcmp(child_path, "")) {
-                ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
-                continue;
-            }
-
-            // Build child cgroup, get the fd to detach from BPF and delete.
-            struct cgroup *child_cg = NULL;
-            int cgroup_fd;
+        if (info.type == CGROUP_FILE_TYPE_DIR && strcmp(info.path, "") != 0) {
             char name[64];
-
             build_cgroup_name((pid_t)atoi(info.path), name, sizeof(name));
-            child_cg = cgroup_new_cgroup(name);
-            if (!child_cg) {
-                return RATELIMIT_CLEANUP;
+
+            struct cgroup *child_cg = cgroup_new_cgroup(name);
+            if (child_cg && cgroup_get_cgroup(child_cg) != 0) {
+                cgroup_free(&child_cg);
             }
-            ret = cgroup_get_cgroup(child_cg);
-            if (ret != 0) {
-                cgroup_free(&cg);
-                return RATELIMIT_CLEANUP;
+            if (child_cg) {
+                int cgroup_fd = open_cgroup_fd(name);
+                delete_cgroup(child_cg, cgroup_fd);
             }
-            cgroup_fd = open_cgroup_fd(name);
-            delete_cgroup(child_cg, cgroup_fd);
         }
         ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
     }
-
     cgroup_walk_tree_end(&handle);
 
     // We removed the children, now we delete the parent cgroup.
     // No need to get the fd since no BPF attached to parent.
-    ret = cgroup_delete_cgroup(cg, 1);
-    if (ret != 0) {
+    if (cgroup_delete_cgroup(cg, 1) != 0) {
+        cgroup_free(&cg);
         return RATELIMIT_LIBCG_DELETE;
     }
     cgroup_free(&cg);
 
     monitor_stop();
-
     return RATELIMIT_OK;
 }
 
