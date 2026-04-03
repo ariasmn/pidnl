@@ -13,7 +13,6 @@
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #ifndef PIDFD_NONBLOCK
@@ -34,6 +33,7 @@ static struct pidfd_entry watched_pids[MAX_WATCHED_PIDS];
 static int watched_count = 0;
 static int monitor_socket = -1;
 static int is_monitor_process = 0;
+static int ready_fd = -1;
 
 static int pidfd_open(pid_t pid, unsigned int flags) {
     return syscall(__NR_pidfd_open, pid, flags);
@@ -192,6 +192,13 @@ void monitor_run(void) {
         exit(1);
     }
 
+    // Signal parent that we're ready
+    if (ready_fd >= 0) {
+        write(ready_fd, "1", 1);
+        close(ready_fd);
+        ready_fd = -1;
+    }
+
     // Set up signal handling
     signal(SIGTERM, SIG_DFL);
     signal(SIGINT, SIG_DFL);
@@ -255,18 +262,9 @@ void monitor_run(void) {
             }
         }
 
-        // Exit if no more PIDs to watch and socket is idle
+        // Exit if no more PIDs to watch
         if (watched_count == 0) {
-            // Small delay to allow for rapid successive commands
-            struct timespec ts = {0, 100000000}; // 100ms
-            nanosleep(&ts, NULL);
-
-            // Check if any new connections came in
-            int check = poll(fds, 1, 0);
-            if (check == 0) {
-                // No new connections, exit
-                break;
-            }
+            break;
         }
     }
 
@@ -311,28 +309,45 @@ int monitor_ensure_running(void) {
     }
 
     // Monitor not running, start it
+    // Create pipe for synchronization
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        return -1;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
         return -1;
     }
 
     if (pid == 0) {
         // Child process - become monitor
-        setsid(); // Create new session
+        close(pipefd[0]);
+        ready_fd = pipefd[1];
+        setsid();
+
         monitor_run();
         exit(0);
     }
 
-    // Parent - wait for socket to appear
-    for (int i = 0; i < 50; i++) { // Wait up to 5 seconds
-        usleep(100000);            // 100ms
-        fd = monitor_connect();
-        if (fd >= 0) {
-            return fd;
-        }
+    // Parent - close write end and wait for child to signal readiness
+    close(pipefd[1]);
+
+    // Use poll with timeout (5 seconds) to wait for readiness signal
+    struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN};
+    int ret = poll(&pfd, 1, 5000);
+    close(pipefd[0]);
+
+    if (ret <= 0) {
+        // Timeout or error - child didn't signal in time
+        return -1;
     }
 
-    return -1;
+    // Child is ready, try to connect
+    fd = monitor_connect();
+    return fd;
 }
 
 static int send_command(const char *cmd, pid_t pid) {
@@ -380,14 +395,9 @@ int monitor_unwatch_pid(pid_t pid) { return send_command(MONITOR_CMD_UNWATCH, pi
 int monitor_stop(void) {
     int fd = monitor_connect();
     if (fd < 0) {
-        return 0; // Already stopped
+        return 0;
     }
 
-    // Just closing the socket will cause monitor to exit if no PIDs
     close(fd);
-
-    // Give it time to exit
-    usleep(200000); // 200ms
-
     return 0;
 }
