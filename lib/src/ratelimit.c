@@ -222,6 +222,7 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     cgroup_free(&parent);
     close_rate_limiter_handle(limiter);
 
+    // TODO: Log warning if monitor registration fails
     monitor_watch_pid(pid);
 
     return RATELIMIT_OK;
@@ -245,6 +246,7 @@ ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
     int cgroup_fd;
     char name[64];
 
+    // TODO: Log warning if monitor unregistration fails
     monitor_unwatch_pid(pid);
 
     build_cgroup_name(pid, name, sizeof(name));

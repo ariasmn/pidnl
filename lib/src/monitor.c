@@ -45,9 +45,9 @@ static int find_pid_slot(pid_t pid) {
 }
 
 // Add PID to watch list, opening a pidfd for death detection
-static int add_pid_to_watch(pid_t pid) {
+static monitor_code add_pid_to_watch(pid_t pid) {
     if (find_pid_slot(pid) >= 0) {
-        return 0; // Already watching
+        return MONITOR_OK;
     }
 
     int slot = -1;
@@ -58,13 +58,13 @@ static int add_pid_to_watch(pid_t pid) {
         }
     }
     if (slot < 0) {
-        return -1; // No slots
+        return MONITOR_SLOTS;
     }
 
     int pidfd = syscall(__NR_pidfd_open, pid, PIDFD_NONBLOCK);
     if (pidfd < 0) {
         unregister_rate_limiter_by_pid(pid);
-        return -1;
+        return MONITOR_PIDFD;
     }
 
     watched_pids[slot].pid = pid;
@@ -72,14 +72,14 @@ static int add_pid_to_watch(pid_t pid) {
     watched_pids[slot].active = 1;
     watched_count++;
 
-    return 0;
+    return MONITOR_OK;
 }
 
 // Remove PID from watch list and close its pidfd
-static int remove_pid_from_watch(pid_t pid) {
+static monitor_code remove_pid_from_watch(pid_t pid) {
     int slot = find_pid_slot(pid);
     if (slot < 0) {
-        return -1;
+        return MONITOR_NOT_FOUND;
     }
 
     close(watched_pids[slot].pidfd);
@@ -88,7 +88,7 @@ static int remove_pid_from_watch(pid_t pid) {
     watched_pids[slot].pidfd = -1;
     watched_count--;
 
-    return 0;
+    return MONITOR_OK;
 }
 
 // Connect to an already-running monitor, returns socket fd or -1
@@ -291,50 +291,94 @@ static int monitor_ensure_running(void) {
     return monitor_connect();
 }
 
-// Send command to monitor, returns 0 on success
-static int send_command(int cmd, pid_t pid) {
+// Send command to monitor, returns monitor_code
+static monitor_code send_command(int cmd, pid_t pid) {
     if (is_monitor_process) {
         if (cmd == CMD_WATCH)
             return add_pid_to_watch(pid);
         if (cmd == CMD_UNWATCH)
             return remove_pid_from_watch(pid);
-        return -1;
+        return MONITOR_NOT_FOUND;
     }
 
     int fd = monitor_ensure_running();
     if (fd < 0) {
-        return -1;
+        return MONITOR_CONNECT;
     }
 
     struct monitor_cmd msg = {.cmd = cmd, .pid = pid};
     if (write(fd, &msg, sizeof(msg)) < 0) {
         close(fd);
-        return -1;
+        return MONITOR_WRITE;
     }
 
     int result = -1;
     ssize_t n = read(fd, &result, sizeof(result));
     close(fd);
 
-    return (n == sizeof(result)) ? result : -1;
+    if (n != sizeof(result)) {
+        return MONITOR_READ;
+    }
+
+    return (monitor_code)result;
 }
 
-int monitor_watch_pid(pid_t pid) { return send_command(CMD_WATCH, pid); }
+monitor_code monitor_watch_pid(pid_t pid) { return send_command(CMD_WATCH, pid); }
 
-int monitor_unwatch_pid(pid_t pid) { return send_command(CMD_UNWATCH, pid); }
+monitor_code monitor_unwatch_pid(pid_t pid) { return send_command(CMD_UNWATCH, pid); }
 
-int monitor_stop(void) {
+monitor_code monitor_stop(void) {
     int fd = monitor_connect();
     if (fd < 0) {
-        return 0;
+        return MONITOR_OK;
     }
 
     struct monitor_cmd msg = {.cmd = CMD_STOP};
-    write(fd, &msg, sizeof(msg));
+    if (write(fd, &msg, sizeof(msg)) < 0) {
+        close(fd);
+        return MONITOR_WRITE;
+    }
 
     int result;
     ssize_t n = read(fd, &result, sizeof(result));
     close(fd);
 
-    return (n == sizeof(result)) ? result : -1;
+    if (n != sizeof(result)) {
+        return MONITOR_READ;
+    }
+
+    return (monitor_code)result;
+}
+
+const char *monitor_code_string(monitor_code code) {
+    switch (code) {
+    case MONITOR_OK:
+        return "Success";
+    case MONITOR_SOCKET:
+        return "Failed to create socket";
+    case MONITOR_CONNECT:
+        return "Failed to connect to monitor daemon";
+    case MONITOR_BIND:
+        return "Failed to bind socket";
+    case MONITOR_LISTEN:
+        return "Failed to listen on socket";
+    case MONITOR_PIPE:
+        return "Failed to create pipe";
+    case MONITOR_FORK:
+        return "Failed to fork daemon process";
+    case MONITOR_WRITE:
+        return "Failed to write to socket";
+    case MONITOR_READ:
+        return "Failed to read from socket";
+    case MONITOR_PIDFD:
+        return "Failed to create pidfd";
+    case MONITOR_SLOTS:
+        return "No available slots for watching PIDs";
+    case MONITOR_NOT_FOUND:
+        return "PID not found in watch list";
+    case MONITOR_TIMEOUT:
+        return "Timeout waiting for daemon startup";
+    default:
+        return "Unknown error";
+    }
 }
