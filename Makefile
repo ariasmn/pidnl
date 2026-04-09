@@ -41,4 +41,10 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
-.PHONY: dev clean check-deps lint
+test: test-container
+	podman run --rm strait
+
+test-container:
+	podman build -t strait .
+
+.PHONY: dev clean check-deps lint test test-container
