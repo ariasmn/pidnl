@@ -7,31 +7,33 @@ source "$SCRIPT_DIR/helpers.sh"
 echo "test_help.sh"
 echo "------------"
 
-# --- strait help ---
-
-test_start "'help' prints usage"
-if assert_stdout_contains "Usage: strait" "$STRAIT_BIN" help; then
-    test_pass
-fi
-
-test_start "'help' prints all commands"
-if assert_stdout_contains "list" "$STRAIT_BIN" help && \
-   assert_stdout_contains "limit" "$STRAIT_BIN" help && \
-   assert_stdout_contains "clean" "$STRAIT_BIN" help && \
-   assert_stdout_contains "help" "$STRAIT_BIN" help; then
-    test_pass
-fi
-
-test_start "'help' exits 0"
-if assert_exit_code 0 "$STRAIT_BIN" help; then
-    test_pass
-fi
-
-# --- strait --help ---
-
 test_start "'--help' prints usage"
 if assert_stdout_contains "Usage: strait" "$STRAIT_BIN" --help; then
     test_pass
+fi
+
+test_start "'--help' mentions all commands"
+if assert_stdout_contains "list" "$STRAIT_BIN" --help && \
+   assert_stdout_contains "limit" "$STRAIT_BIN" --help && \
+   assert_stdout_contains "clean" "$STRAIT_BIN" --help; then
+    test_pass
+fi
+
+test_start "'--help' mentions -h option"
+output=$("$STRAIT_BIN" --help 2>/dev/null)
+if [[ "$output" == *"-h, --help"* ]]; then
+    test_pass
+else
+    test_fail "stdout missing: '-h, --help'"
+    echo "       got: $(echo "$output" | head -3)"
+fi
+
+test_start "'--help' does not list 'help' as a command"
+output=$("$STRAIT_BIN" --help 2>/dev/null)
+if [[ "$output" != *"  help                "* ]]; then
+    test_pass
+else
+    test_fail "stdout should not contain 'help' command line"
 fi
 
 test_start "'--help' exits 0"
@@ -48,6 +50,30 @@ fi
 
 test_start "'-h' exits 0"
 if assert_exit_code 0 "$STRAIT_BIN" -h; then
+    test_pass
+fi
+
+# --- strait limit --help ---
+
+test_start "'limit --help' prints limit usage"
+if assert_stdout_contains "limit set" "$STRAIT_BIN" limit --help; then
+    test_pass
+fi
+
+test_start "'limit --help' exits 0"
+if assert_exit_code 0 "$STRAIT_BIN" limit --help; then
+    test_pass
+fi
+
+# --- strait clean --help ---
+
+test_start "'clean --help' prints clean usage"
+if assert_stdout_contains "clean" "$STRAIT_BIN" clean --help; then
+    test_pass
+fi
+
+test_start "'clean --help' exits 0"
+if assert_exit_code 0 "$STRAIT_BIN" clean --help; then
     test_pass
 fi
 
@@ -75,15 +101,15 @@ if assert_exit_code 1 "$STRAIT_BIN" boguscommand; then
     test_pass
 fi
 
-# --- help output content ---
+# --- 'help' is not a valid command ---
 
-test_start "'help' mentions --help option"
-if assert_stdout_contains "--help" "$STRAIT_BIN" help; then
+test_start "'help' is rejected as unknown command"
+if assert_stderr_contains "unknown command" "$STRAIT_BIN" help; then
     test_pass
 fi
 
-test_start "'help' mentions -h option"
-if assert_stdout_contains "-h" "$STRAIT_BIN" help; then
+test_start "'help' exits non-zero"
+if assert_exit_code 1 "$STRAIT_BIN" help; then
     test_pass
 fi
 
