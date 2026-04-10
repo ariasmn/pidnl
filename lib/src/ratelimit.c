@@ -274,11 +274,11 @@ ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
 ratelimit_code ratelimit_cleanup_all(void) {
     struct cgroup *cg = cgroup_new_cgroup(CGROUP_NAME);
     if (!cg) {
-        return RATELIMIT_CLEANUP;
+        return RATELIMIT_OK;
     }
     if (cgroup_get_cgroup(cg) != 0) {
         cgroup_free(&cg);
-        return RATELIMIT_CLEANUP;
+        return RATELIMIT_OK;
     }
 
     // Using "cpu" since I don't care about the controller being used, and I guess
@@ -431,8 +431,6 @@ const char *ratelimit_code_string(ratelimit_code code) {
         return "Failed to attach process to cgroup";
     case RATELIMIT_LIBCG_DELETE:
         return "Failed to delete cgroup";
-    case RATELIMIT_CLEANUP:
-        return "Failed to clean up cgroups and BPF";
     default:
         return "Unknown error";
     }
