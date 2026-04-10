@@ -41,10 +41,8 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
-test: test-container
-	podman run --rm strait
+test:
+	@if [ "$$(id -u)" -ne 0 ]; then echo "error: tests require root (run with sudo)" && exit 1; fi
+	@bash tests/run.sh
 
-test-container:
-	podman build -t strait .
-
-.PHONY: dev clean check-deps lint test test-container
+.PHONY: dev clean check-deps lint test

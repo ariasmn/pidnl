@@ -1,6 +1,0 @@
-.git
-*.o
-*.so
-*.a
-*.skel.h
-cli/strait
