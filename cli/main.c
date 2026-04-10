@@ -399,6 +399,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    cmd->handler(argc - cmd_index, argv + cmd_index);
+    cmd->handler(argc - cmd_index - 1, argv + cmd_index + 1);
     return EXIT_SUCCESS;
 }

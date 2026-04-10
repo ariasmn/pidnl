@@ -117,3 +117,64 @@ print_summary() {
 
     return "$TESTS_FAILED"
 }
+
+# --- BPF and cgroup helpers ---
+
+# Check that a cgroup directory exists for a PID under /sys/fs/cgroup/strait/
+assert_cgroup_exists() {
+    local pid="$1"
+    if [ ! -d "/sys/fs/cgroup/strait/${pid}" ]; then
+        test_fail "cgroup /sys/fs/cgroup/strait/${pid} does not exist"
+        return 1
+    fi
+    return 0
+}
+
+# Check that a cgroup directory does NOT exist
+assert_cgroup_not_exists() {
+    local pid="$1"
+    if [ -d "/sys/fs/cgroup/strait/${pid}" ]; then
+        test_fail "cgroup /sys/fs/cgroup/strait/${pid} still exists"
+        return 1
+    fi
+    return 0
+}
+
+# Check that BPF programs are attached via bpftool
+assert_bpf_attached() {
+    local output
+    output=$(bpftool prog show 2>/dev/null || true)
+    if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
+        return 0
+    fi
+    test_fail "no BPF programs (egress_rl/ingress_rl) found"
+    return 1
+}
+
+# Check that BPF programs are NOT attached (after unset/clean)
+assert_bpf_not_attached() {
+    local output
+    output=$(bpftool prog show 2>/dev/null || true)
+    if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
+        test_fail "BPF programs still present after cleanup"
+        return 1
+    fi
+    return 0
+}
+
+# Start a background process with a TCP listener
+_NC_PID=""
+start_nc_listener() {
+    local port="${1:-9999}"
+    nc -l -p "$port" >/dev/null 2>&1 &
+    _NC_PID=$!
+    sleep 0.5
+}
+
+stop_nc_listener() {
+    if [ -n "$_NC_PID" ]; then
+        kill "$_NC_PID" 2>/dev/null || true
+        wait "$_NC_PID" 2>/dev/null || true
+        _NC_PID=""
+    fi
+}
