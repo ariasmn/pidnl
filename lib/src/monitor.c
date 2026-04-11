@@ -214,13 +214,13 @@ static void monitor_run(void) {
                 continue;
             }
 
-            int result = -1;
+            int result = MONITOR_NOT_FOUND;
             if (msg.cmd == CMD_WATCH) {
                 result = add_pid_to_watch(msg.pid);
             } else if (msg.cmd == CMD_UNWATCH) {
                 result = remove_pid_from_watch(msg.pid);
             } else if (msg.cmd == CMD_STOP) {
-                result = 0;
+                result = MONITOR_OK;
                 running = 0;
             }
 
