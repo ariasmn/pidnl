@@ -5,7 +5,6 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -27,6 +26,12 @@ struct pidfd_entry {
     pid_t pid;
     int pidfd;
     int active;
+};
+
+struct peer_cred {
+    pid_t pid;
+    uid_t uid;
+    gid_t gid;
 };
 
 static struct pidfd_entry watched_pids[MAX_WATCHED_PIDS];
@@ -125,11 +130,10 @@ static void monitor_run(void) {
 
     is_monitor_process = 1;
 
-    // Create unix socket
     struct sockaddr_un addr;
     struct stat st;
     if (stat(MONITOR_SOCKET_DIR, &st) < 0) {
-        if (mkdir(MONITOR_SOCKET_DIR, 0755) < 0 && errno != EEXIST) {
+        if (mkdir(MONITOR_SOCKET_DIR, 0700) < 0 && errno != EEXIST) {
             exit(1);
         }
     }
@@ -191,25 +195,37 @@ static void monitor_run(void) {
         // Handle new CLI connection
         if (fds[0].revents & POLLIN) {
             int client_fd = accept(monitor_socket, NULL, NULL);
-            if (client_fd >= 0) {
-                struct monitor_cmd msg;
-                ssize_t n = read(client_fd, &msg, sizeof(msg));
-                int result = -1;
-
-                if (n == sizeof(msg)) {
-                    if (msg.cmd == CMD_WATCH) {
-                        result = add_pid_to_watch(msg.pid);
-                    } else if (msg.cmd == CMD_UNWATCH) {
-                        result = remove_pid_from_watch(msg.pid);
-                    } else if (msg.cmd == CMD_STOP) {
-                        result = 0;
-                        running = 0;
-                    }
-                }
-
-                write(client_fd, &result, sizeof(result));
-                close(client_fd);
+            if (client_fd < 0) {
+                continue;
             }
+
+            struct peer_cred cred;
+            socklen_t len = sizeof(cred);
+            if (getsockopt(client_fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0 || cred.uid != 0) {
+                // Require root to prevent unprivileged users from sending commands
+                close(client_fd);
+                continue;
+            }
+
+            struct monitor_cmd msg;
+            ssize_t n = read(client_fd, &msg, sizeof(msg));
+            if (n != sizeof(msg)) {
+                close(client_fd);
+                continue;
+            }
+
+            int result = -1;
+            if (msg.cmd == CMD_WATCH) {
+                result = add_pid_to_watch(msg.pid);
+            } else if (msg.cmd == CMD_UNWATCH) {
+                result = remove_pid_from_watch(msg.pid);
+            } else if (msg.cmd == CMD_STOP) {
+                result = 0;
+                running = 0;
+            }
+
+            write(client_fd, &result, sizeof(result));
+            close(client_fd);
         }
 
         // Handle PID deaths
