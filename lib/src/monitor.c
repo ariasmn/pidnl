@@ -194,7 +194,7 @@ static void monitor_run(void) {
             if (client_fd >= 0) {
                 struct monitor_cmd msg;
                 ssize_t n = read(client_fd, &msg, sizeof(msg));
-                int result = -1;
+                int result = MONITOR_NOT_FOUND;
 
                 if (n == sizeof(msg)) {
                     if (msg.cmd == CMD_WATCH) {
@@ -202,7 +202,7 @@ static void monitor_run(void) {
                     } else if (msg.cmd == CMD_UNWATCH) {
                         result = remove_pid_from_watch(msg.pid);
                     } else if (msg.cmd == CMD_STOP) {
-                        result = 0;
+                        result = MONITOR_OK;
                         running = 0;
                     }
                 }
