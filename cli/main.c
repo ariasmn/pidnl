@@ -6,40 +6,56 @@
 #include <unistd.h>
 
 #define PROGRAM_NAME "strait"
+#define PROGRAM_USAGE                                                                              \
+    "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [ARGS]...\n"                                        \
+    "Commands:\n"                                                                                  \
+    "  list                List processes with network connections\n"                              \
+    "  limit               Limit bandwidth for a process\n"                                        \
+    "  clean               Clean up all rate limits and cgroups\n"                                 \
+    "\nOptions:\n"                                                                                 \
+    "  -h, --help          Display this help message"
 
-static const char *program_usage = "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [ARGS]...\n"
-                                   "Commands:\n"
-                                   "  list                List processes with network connections\n"
-                                   "  limit               Limit bandwidth for a process\n"
-                                   "  clean               Clean up all rate limits and cgroups\n"
-                                   "  help                Display this help message\n\n"
-                                   "Options:\n"
-                                   "  -h, --help          Display this help message";
+#define LIMIT_USAGE                                                                                \
+    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> <download_kbps>\n"                      \
+    "       " PROGRAM_NAME " limit unset <pid>\n\n"                                                \
+    "Commands:\n"                                                                                  \
+    "  set <pid> <upload> <download>    Limit bandwidth for a process\n"                           \
+    "  unset <pid>                      Remove rate limit for a process\n\n"                       \
+    "Examples:\n"                                                                                  \
+    "  " PROGRAM_NAME " limit set 12345 1000 2000\n"                                               \
+    "  " PROGRAM_NAME " limit unset 12345"
 
-static const char *limit_usage =
-    "Usage: " PROGRAM_NAME " limit set <pid> <upload_kbps> <download_kbps>\n"
-    "       " PROGRAM_NAME " limit unset <pid>\n\n"
-    "Commands:\n"
-    "  set <pid> <upload> <download>    Limit bandwidth for a process\n"
-    "  unset <pid>                      Remove rate limit for a process\n\n"
-    "Examples:\n"
-    "  " PROGRAM_NAME " limit set 12345 1000 2000\n"
-    "  " PROGRAM_NAME " limit unset 12345";
-
-static const char *clean_usage =
-    "Usage: " PROGRAM_NAME " clean [--yes]\n\n"
-    "Clean up all rate limits and cgroups created by " PROGRAM_NAME ".\n\n"
-    "Options:\n"
-    "  --yes, -y  Skip confirmation prompt\n\n"
-    "This will: remove all rate limits from processes\n";
+#define CLEAN_USAGE                                                                                \
+    "Usage: " PROGRAM_NAME " clean [--yes]\n\n"                                                    \
+    "Clean up all rate limits and cgroups created by " PROGRAM_NAME ".\n\n"                        \
+    "Options:\n"                                                                                   \
+    "  --yes, -y  Skip confirmation prompt\n\n"                                                    \
+    "This will remove all rate limits from processes"
 
 typedef void (*cmd_handler)(int argc, char *argv[]);
 
 typedef struct {
     const char *name;
     const char *description;
+    const char *usage;
     cmd_handler handler;
 } command;
+
+/* Forward declarations so the command table can reference them */
+static void cmd_list(int argc, char *argv[]);
+static void handle_limit(int argc, char *argv[]);
+static void cmd_limit_set(int argc, char *argv[]);
+static void cmd_limit_unset(int argc, char *argv[]);
+static void cmd_clean(int argc, char *argv[]);
+
+static int has_help_flag(int argc, char *argv[]) {
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static void format_limit(char *buf, size_t size, uint64_t bps) {
     uint64_t kbps = (bps * 8) / 1000;
@@ -126,17 +142,8 @@ static void cmd_list(int argc, char *argv[]) {
 }
 
 static void cmd_limit_set(int argc, char *argv[]) {
-    int help_shown = 0;
-
-    for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            help_shown = 1;
-            break;
-        }
-    }
-
-    if (help_shown || argc < 3) {
-        printf("%s\n", limit_usage);
+    if (argc < 3) {
+        printf("%s\n", LIMIT_USAGE);
         exit(EXIT_SUCCESS);
     }
 
@@ -222,17 +229,8 @@ static void cmd_limit_set(int argc, char *argv[]) {
 }
 
 static void cmd_limit_unset(int argc, char *argv[]) {
-    int help_shown = 0;
-
-    for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            help_shown = 1;
-            break;
-        }
-    }
-
-    if (help_shown || argc < 1) {
-        printf("%s\n", limit_usage);
+    if (argc < 1) {
+        printf("%s\n", LIMIT_USAGE);
         exit(EXIT_SUCCESS);
     }
 
@@ -252,18 +250,9 @@ static void cmd_limit_unset(int argc, char *argv[]) {
     printf("Removed rate limit for PID %d\n", pid);
 }
 
-static void cmd_limit(int argc, char *argv[]) {
-    int help_shown = 0;
-
-    for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            help_shown = 1;
-            break;
-        }
-    }
-
-    if (help_shown) {
-        printf("%s\n", limit_usage);
+static void handle_limit(int argc, char *argv[]) {
+    if (has_help_flag(argc, argv)) {
+        printf("%s\n", LIMIT_USAGE);
         exit(EXIT_SUCCESS);
     }
 
@@ -271,16 +260,6 @@ static void cmd_limit(int argc, char *argv[]) {
         fprintf(stderr, "missing subcommand\n");
         fprintf(stderr, "Try '%s limit --help' for more information.\n", PROGRAM_NAME);
         exit(EXIT_FAILURE);
-    }
-
-    if (strcmp(argv[0], "limit") == 0) {
-        argv++;
-        argc--;
-        if (argc < 1) {
-            fprintf(stderr, "missing subcommand\n");
-            fprintf(stderr, "Try '%s limit --help' for more information.\n", PROGRAM_NAME);
-            exit(EXIT_FAILURE);
-        }
     }
 
     if (strcmp(argv[0], "set") == 0) {
@@ -294,24 +273,12 @@ static void cmd_limit(int argc, char *argv[]) {
     }
 }
 
-static void cmd_help(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
-
-    printf("%s\n", program_usage);
-}
-
 static void cmd_clean(int argc, char *argv[]) {
     int skip_confirmation = 0;
 
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
             skip_confirmation = 1;
-            break;
-        }
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("%s\n", clean_usage);
-            exit(EXIT_SUCCESS);
         }
     }
 
@@ -338,10 +305,9 @@ static void cmd_clean(int argc, char *argv[]) {
 }
 
 static const command commands[] = {
-    {"list", "List processes with network connections", cmd_list},
-    {"limit", "Limit bandwidth for a process", cmd_limit},
-    {"clean", "Clean up all rate limits", cmd_clean},
-    {"help", "Display this help message", cmd_help},
+    {"list", "List processes with network connections", PROGRAM_USAGE, cmd_list},
+    {"limit", "Limit bandwidth for a process", LIMIT_USAGE, handle_limit},
+    {"clean", "Clean up all rate limits", CLEAN_USAGE, cmd_clean},
 };
 
 static const size_t num_commands = sizeof(commands) / sizeof(commands[0]);
@@ -368,19 +334,39 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    int global_help = 0;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            if (i == 1) {
-                global_help = 1;
+    /* Handle --help/-h anywhere in the argument list first.
+     * This makes all of these work:
+     *   strait --help
+     *   strait -h
+     *   strait limit --help
+     *   strait clean --help
+     * All of them print usage and exit 0, no root required.
+     */
+    if (has_help_flag(argc, argv)) {
+        int cmd_index = -1;
+        for (int i = 1; i < argc; i++) {
+            if (argv[i][0] != '-') {
+                cmd_index = i;
+                break;
             }
-            break;
         }
-    }
 
-    if (global_help) {
-        printf("%s\n", program_usage);
-        return EXIT_SUCCESS;
+        if (cmd_index < 0) {
+            printf("%s\n", PROGRAM_USAGE);
+            return EXIT_SUCCESS;
+        }
+
+        const command *cmd = find_command(argv[cmd_index]);
+        if (cmd) {
+            printf("%s\n", cmd->usage);
+            return EXIT_SUCCESS;
+        }
+
+        fprintf(stderr, "%s: unknown command '%s'\n", PROGRAM_NAME, argv[cmd_index]);
+        fprintf(stderr, "\nAvailable commands:\n");
+        print_command_list();
+        fprintf(stderr, "\nTry '%s --help' for more information.\n", PROGRAM_NAME);
+        return EXIT_FAILURE;
     }
 
     int cmd_index = -1;
@@ -400,13 +386,7 @@ int main(int argc, char *argv[]) {
     }
 
     const command *cmd = find_command(argv[cmd_index]);
-    if (cmd) {
-        if (strcmp(cmd->name, "help") != 0 && geteuid() != 0) {
-            fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
-            return EXIT_FAILURE;
-        }
-        cmd->handler(argc - cmd_index, argv + cmd_index);
-    } else {
+    if (!cmd) {
         fprintf(stderr, "%s: unknown command '%s'\n", PROGRAM_NAME, argv[cmd_index]);
         fprintf(stderr, "\nAvailable commands:\n");
         print_command_list();
@@ -414,5 +394,11 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    if (geteuid() != 0) {
+        fprintf(stderr, "%s: this command requires root privileges\n", PROGRAM_NAME);
+        return EXIT_FAILURE;
+    }
+
+    cmd->handler(argc - cmd_index - 1, argv + cmd_index + 1);
     return EXIT_SUCCESS;
 }

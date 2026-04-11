@@ -41,4 +41,8 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
-.PHONY: dev clean check-deps lint
+test:
+	@if [ "$$(id -u)" -ne 0 ]; then echo "error: tests require root (run with sudo)" && exit 1; fi
+	@bash tests/run.sh
+
+.PHONY: dev clean check-deps lint test
