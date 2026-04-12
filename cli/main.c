@@ -1,5 +1,6 @@
 #include "discovery.h"
 #include "ratelimit.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +48,31 @@ static void handle_limit(int argc, char *argv[]);
 static void cmd_limit_set(int argc, char *argv[]);
 static void cmd_limit_unset(int argc, char *argv[]);
 static void cmd_clean(int argc, char *argv[]);
+
+static uint32_t parse_rate(const char *arg) {
+    if (strcmp(arg, "-1") == 0) {
+        return RATELIMIT_UNLIMITED;
+    }
+    char *endptr;
+    errno = 0;
+    unsigned long ul = strtoul(arg, &endptr, 10);
+    if (errno != 0 || *endptr != '\0' || ul > UINT32_MAX) {
+        fprintf(stderr, "%s: invalid rate: %s\n", PROGRAM_NAME, arg);
+        exit(EXIT_FAILURE);
+    }
+    return (uint32_t)ul;
+}
+
+static pid_t parse_pid(const char *arg) {
+    char *endptr;
+    errno = 0;
+    long pid_long = strtol(arg, &endptr, 10);
+    if (errno != 0 || *endptr != '\0' || pid_long <= 0) {
+        fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, arg);
+        exit(EXIT_FAILURE);
+    }
+    return (pid_t)pid_long;
+}
 
 static int has_help_flag(int argc, char *argv[]) {
     for (int i = 0; i < argc; i++) {
@@ -147,21 +173,14 @@ static void cmd_limit_set(int argc, char *argv[]) {
         exit(EXIT_SUCCESS);
     }
 
-    pid_t pid = (pid_t)atoi(argv[0]);
-    uint32_t upload_kbps =
-        (strcmp(argv[1], "-1") == 0) ? RATELIMIT_UNLIMITED : (uint32_t)atoi(argv[1]);
-    uint32_t download_kbps =
-        (strcmp(argv[2], "-1") == 0) ? RATELIMIT_UNLIMITED : (uint32_t)atoi(argv[2]);
+    pid_t pid = parse_pid(argv[0]);
+    uint32_t upload_kbps = parse_rate(argv[1]);
+    uint32_t download_kbps = parse_rate(argv[2]);
 
     if (upload_kbps == RATELIMIT_UNLIMITED && download_kbps == RATELIMIT_UNLIMITED) {
         fprintf(
             stderr, "%s: Error: Cannot set both upload and download to unlimited\n", PROGRAM_NAME
         );
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid <= 0) {
-        fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -234,12 +253,7 @@ static void cmd_limit_unset(int argc, char *argv[]) {
         exit(EXIT_SUCCESS);
     }
 
-    pid_t pid = (pid_t)atoi(argv[0]);
-
-    if (pid <= 0) {
-        fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, argv[0]);
-        exit(EXIT_FAILURE);
-    }
+    pid_t pid = parse_pid(argv[0]);
 
     ratelimit_code err = unregister_rate_limiter_by_pid(pid);
     if (err != RATELIMIT_OK) {
