@@ -4,6 +4,7 @@
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
 #include <linux/limits.h>
@@ -232,6 +233,9 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
     if (!limiter) {
         return;
     }
+    if (limiter->cgroup_fd >= 0) {
+        close(limiter->cgroup_fd);
+    }
     if (limiter->skel) {
         ratelimit_bpf__destroy(limiter->skel);
     }
@@ -290,7 +294,14 @@ ratelimit_code ratelimit_cleanup_all(void) {
     while (ret == 0) {
         if (info.type == CGROUP_FILE_TYPE_DIR && strcmp(info.path, "") != 0) {
             char name[64];
-            build_cgroup_name((pid_t)atoi(info.path), name, sizeof(name));
+            char *endptr;
+            errno = 0;
+            long pid_long = strtol(info.path, &endptr, 10);
+            if (errno != 0 || *endptr != '\0' || pid_long <= 0) {
+                ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
+                continue;
+            }
+            build_cgroup_name((pid_t)pid_long, name, sizeof(name));
 
             struct cgroup *child_cg = cgroup_new_cgroup(name);
             if (child_cg && cgroup_get_cgroup(child_cg) != 0) {
