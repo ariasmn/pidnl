@@ -9,6 +9,7 @@
 
 // Rate limit state per direction (for token bucket)
 struct rate_limit_state {
+    struct bpf_spin_lock lock; // must be first field
     __u64 tokens;
     __u64 last_update_ns;
 };
@@ -37,12 +38,13 @@ struct {
 static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
     struct rate_limit_state *state;
     __u64 now = bpf_ktime_get_ns();
-    __u64 tokens_to_add;
 
     state = bpf_map_lookup_elem(&rate_state, &direction);
     if (!state) {
         return 1;
     }
+
+    bpf_spin_lock(&state->lock);
 
     // Calculate tokens to add based on elapsed time.
     // Convert to microseconds first to avoid overflow at high rates,
@@ -51,7 +53,7 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
     if (elapsed_us > 1000000ULL) {
         elapsed_us = 1000000ULL;
     }
-    tokens_to_add = (limit_bps * elapsed_us) / 1000000ULL;
+    __u64 tokens_to_add = (limit_bps * elapsed_us) / 1000000ULL;
 
     state->tokens += tokens_to_add;
     state->last_update_ns = now;
@@ -63,12 +65,14 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
     }
 
     // Check if we have enough tokens
+    int ret = 0;
     if (state->tokens >= packet_size) {
         state->tokens -= packet_size;
-        return 1;
+        ret = 1;
     }
 
-    return 0;
+    bpf_spin_unlock(&state->lock);
+    return ret;
 }
 
 SEC("cgroup/skb")
