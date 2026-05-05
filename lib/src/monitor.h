@@ -3,8 +3,8 @@
 
 #include <sys/types.h>
 
-#define MONITOR_SOCKET_PATH "/run/strait/monitor.sock"
 #define MONITOR_SOCKET_DIR "/run/strait"
+#define MONITOR_SOCKET_PATH "/run/strait/monitor.sock"
 
 enum {
     CMD_WATCH = 1,
