@@ -109,16 +109,17 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd, const char *name) {
 
     if (cg) {
         cgroup_delete_cgroup(cg, 1);
-        cgroup_free(&cg);
-    }
 
-    // libcgroup2 may not remove empty directories when no controllers
-    // are attached. Clean up manually to be safe.
-    char mount_path[PATH_MAX];
-    char full_path[PATH_MAX];
-    if (name && get_cgroup2_mount_path(mount_path, sizeof(mount_path)) == 0) {
-        snprintf(full_path, sizeof(full_path), "%s/%s", mount_path, name);
-        rmdir(full_path);
+        // libcgroup < 3.0 does not remove empty directories when no
+        // controllers are attached. Clean up manually as a fallback.
+        char mount_path[PATH_MAX];
+        char full_path[PATH_MAX];
+        if (name && get_cgroup2_mount_path(mount_path, sizeof(mount_path)) == 0) {
+            snprintf(full_path, sizeof(full_path), "%s/%s", mount_path, name);
+            rmdir(full_path);
+        }
+
+        cgroup_free(&cg);
     }
 }
 
