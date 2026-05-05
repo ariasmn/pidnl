@@ -40,32 +40,5 @@ jobs:
             netcat-openbsd
       - name: Build
         run: make dev
-      - name: Debug environment
-        run: |
-          echo "--- cgroup mounts ---"
-          mount | grep cgroup
-          echo "--- /proc/self/cgroup ---"
-          cat /proc/self/cgroup
-          echo "--- cgroup root ls ---"
-          ls -la /sys/fs/cgroup/
-          echo "--- bpftool version ---"
-          bpftool version
-          echo "--- kernel version ---"
-          uname -a
-      - name: Debug limit set
-        run: |
-          nc -l -p 9999 &
-          NC_PID=$!
-          sleep 0.5
-          echo "--- strait list ---"
-          sudo ./cli/strait list || true
-          echo "--- trying limit set ---"
-          sudo ./cli/strait limit set "$NC_PID" 1000 2000 2>&1 || true
-          echo "--- cgroup state ---"
-          ls -la /sys/fs/cgroup/strait/ 2>/dev/null || echo "no strait cgroup at root"
-          echo "--- searching for strait cgroup ---"
-          find /sys/fs/cgroup -type d -name "strait" 2>/dev/null || echo "no strait found"
-          kill "$NC_PID" 2>/dev/null || true
-          wait "$NC_PID" 2>/dev/null || true
       - name: Run tests
         run: sudo make test
