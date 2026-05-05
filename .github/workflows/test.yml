@@ -1,0 +1,67 @@
+name: Test
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Workaround for missing bpftool (bug #2117147)
+        run: |
+          if ! bpftool version &> /dev/null; then
+            echo "bpftool broken or missing, building from source..."
+            KERNEL_VERSION=$(uname -r)
+            KERNEL_MAJOR_MINOR=$(uname -r | awk -F'[.-]' '{print $1 "." $2}')
+            BUILD_DIR="/usr/lib/linux-tools/${KERNEL_VERSION}"
+            sudo apt-get update
+            sudo apt-get install -y build-essential libelf-dev clang llvm
+            cd /tmp
+            wget -q https://mirrors.edge.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_MAJOR_MINOR}.tar.xz
+            tar -xf linux-${KERNEL_MAJOR_MINOR}.tar.xz
+            cd linux-${KERNEL_MAJOR_MINOR}/tools/bpf/bpftool
+            make -j$(nproc)
+            sudo mkdir -p ${BUILD_DIR}
+            sudo install -m 0755 bpftool ${BUILD_DIR}/bpftool
+            echo "bpftool installed successfully:"
+            bpftool version
+          else
+            echo "bpftool already working"
+          fi
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            linux-tools-generic \
+            libbpf-dev \
+            libnl-3-dev \
+            libnl-route-3-dev \
+            libelf-dev \
+            libcgroup-dev \
+            netcat-openbsd
+      - name: Build
+        run: make dev
+      - name: Debug environment
+        run: |
+          echo "--- cgroup mounts ---"
+          mount | grep cgroup
+          echo "--- cgroup root ls ---"
+          ls -la /sys/fs/cgroup/
+          echo "--- bpftool version ---"
+          bpftool version
+          echo "--- kernel version ---"
+          uname -a
+      - name: Debug limit set
+        run: |
+          nc -l -p 9999 &
+          NC_PID=$!
+          sleep 0.5
+          echo "--- strait list ---"
+          sudo ./cli/strait list || true
+          echo "--- trying limit set ---"
+          sudo ./cli/strait limit set "$NC_PID" 1000 2000 2>&1 || true
+          echo "--- cgroup state ---"
+          ls -la /sys/fs/cgroup/strait/ 2>/dev/null || echo "no strait cgroup"
+          kill "$NC_PID" 2>/dev/null || true
+          wait "$NC_PID" 2>/dev/null || true
+      - name: Run tests
+        run: sudo make test
