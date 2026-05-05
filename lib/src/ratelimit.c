@@ -295,7 +295,8 @@ ratelimit_code ratelimit_cleanup_all(void) {
     void *handle = NULL;
     struct cgroup_file_info info;
     int base_level;
-    int ret = cgroup_walk_tree_begin(CGROUP_WALK_CONTROLLER, CGROUP_NAME, 0, &handle, &info, &base_level);
+    int ret =
+        cgroup_walk_tree_begin(CGROUP_WALK_CONTROLLER, CGROUP_NAME, 0, &handle, &info, &base_level);
     while (ret == 0) {
         if (info.type == CGROUP_FILE_TYPE_DIR && strcmp(info.path, "") != 0) {
             char name[64];
