@@ -23,6 +23,14 @@
  */
 #define SOCKET_BUFFER_SIZE getpagesize()
 
+static const char PROC_ROOT[] = "/proc";
+static const char PROC_COMM_FMT[] = "/proc/%d/comm";
+static const char PROC_EXE_FMT[] = "/proc/%d/exe";
+static const char PROC_FD_DIR_FMT[] = "/proc/%ld/fd";
+static const char PROC_FD_LINK_FMT[] = "/proc/%ld/fd/%s";
+static const char SOCKET_LINK_FMT[] = "socket:[%u]";
+static const __u32 UID_MIN_DEFAULT = 1000;
+
 typedef struct {
     struct nlmsghdr nlh;
     struct inet_diag_req_v2 req;
@@ -77,7 +85,7 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
     proc->has_udp = !is_tcp;
 
     char path[PROC_PATH_MAX];
-    snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+    snprintf(path, sizeof(path), PROC_COMM_FMT, pid);
     FILE *f = fopen(path, "r");
     if (f) {
         if (fgets(proc->process_name, sizeof(proc->process_name), f)) {
@@ -89,7 +97,7 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
         fclose(f);
     }
 
-    snprintf(path, sizeof(path), "/proc/%d/exe", pid);
+    snprintf(path, sizeof(path), PROC_EXE_FMT, pid);
     ssize_t len = readlink(path, proc->exe_path, sizeof(proc->exe_path) - 1);
     if (len != -1) {
         proc->exe_path[len] = '\0';
@@ -103,7 +111,7 @@ static pid_t find_pid_by_inode(unsigned int inode) {
     char path[PROC_PATH_MAX];
     char link[SOCKET_LINK_MAX];
 
-    DIR *proc_dir = opendir("/proc");
+    DIR *proc_dir = opendir(PROC_ROOT);
     if (!proc_dir) {
         return -1;
     }
@@ -120,7 +128,7 @@ static pid_t find_pid_by_inode(unsigned int inode) {
             continue;
         }
 
-        snprintf(path, sizeof(path), "/proc/%ld/fd", pid);
+        snprintf(path, sizeof(path), PROC_FD_DIR_FMT, pid);
         DIR *fd_dir = opendir(path);
         if (!fd_dir) {
             continue;
@@ -133,14 +141,14 @@ static pid_t find_pid_by_inode(unsigned int inode) {
             }
 
             char fd_path[PATH_MAX];
-            snprintf(fd_path, sizeof(fd_path), "/proc/%ld/fd/%s", pid, fd_entry->d_name);
+            snprintf(fd_path, sizeof(fd_path), PROC_FD_LINK_FMT, pid, fd_entry->d_name);
 
             ssize_t len = readlink(fd_path, link, sizeof(link) - 1);
             if (len > 0) {
                 link[len] = '\0';
 
                 unsigned int fd_inode;
-                if (sscanf(link, "socket:[%u]", &fd_inode) == 1) {
+                if (sscanf(link, SOCKET_LINK_FMT, &fd_inode) == 1) {
                     if (fd_inode == inode) {
                         closedir(fd_dir);
                         closedir(proc_dir);
@@ -205,7 +213,7 @@ static int query_sockets(int fd, int family, int protocol, process_list *list) {
             }
             if (h->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
                 struct inet_diag_msg *diag = NLMSG_DATA(h);
-                if (diag->idiag_uid == 0 || diag->idiag_uid >= 1000) {
+                if (diag->idiag_uid == 0 || diag->idiag_uid >= UID_MIN_DEFAULT) {
                     pid_t pid = find_pid_by_inode(diag->idiag_inode);
                     if (pid > 0) {
                         if (add_process_list(list, pid, protocol == IPPROTO_TCP) != 0) {

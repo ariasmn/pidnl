@@ -16,6 +16,11 @@
 #include <unistd.h>
 
 #define CGROUP_NAME "strait"
+
+static const char PROC_MOUNTS[] = "/proc/mounts";
+static const char CGROUP2_FS[] = "cgroup2";
+static const char CGROUP_WALK_CONTROLLER[] = "cpu";
+
 static const unsigned int DIRECTION_UPLOAD = 0;
 static const unsigned int DIRECTION_DOWNLOAD = 1;
 
@@ -34,13 +39,13 @@ static int get_cgroup2_mount_path(char *buf, size_t size) {
     struct mntent *ent;
     int found = 0;
 
-    f = setmntent("/proc/mounts", "r");
+    f = setmntent(PROC_MOUNTS, "r");
     if (!f) {
         return -1;
     }
 
     while ((ent = getmntent(f)) != NULL) {
-        if (strcmp(ent->mnt_type, "cgroup2") == 0) {
+        if (strcmp(ent->mnt_type, CGROUP2_FS) == 0) {
             snprintf(buf, size, "%s", ent->mnt_dir);
             found = 1;
             break;
@@ -318,12 +323,13 @@ ratelimit_code ratelimit_cleanup_all(void) {
         return RATELIMIT_OK;
     }
 
-    // Using "cpu" since I don't care about the controller being used, and I guess
-    // this one should always exist.
+    // Using CGROUP_WALK_CONTROLLER since I don't care about the controller being
+    // used, and I guess this one should always exist.
     void *handle = NULL;
     struct cgroup_file_info info;
     int base_level;
-    int ret = cgroup_walk_tree_begin("cpu", CGROUP_NAME, 0, &handle, &info, &base_level);
+    int ret =
+        cgroup_walk_tree_begin(CGROUP_WALK_CONTROLLER, CGROUP_NAME, 0, &handle, &info, &base_level);
     while (ret == 0) {
         if (info.type == CGROUP_FILE_TYPE_DIR && strcmp(info.path, "") != 0) {
             char name[64];
@@ -428,7 +434,7 @@ int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download)
     }
 
     char name[64];
-    snprintf(name, sizeof(name), "%s/%d", CGROUP_NAME, pid);
+    build_cgroup_name(pid, name, sizeof(name));
 
     int cgroup_fd = open_cgroup_fd(name);
     if (cgroup_fd < 0) {
