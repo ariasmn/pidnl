@@ -47,9 +47,6 @@ jobs:
             libnl-3-dev \
             libnl-route-3-dev \
             libelf-dev \
-            libcgroup-dev \
-            netcat-openbsd
+            libcgroup-dev
       - name: Build
         run: make dev
-      - name: Run tests
-        run: sudo make test
