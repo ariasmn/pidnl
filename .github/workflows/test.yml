@@ -5,5 +5,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Debug environment
+        run: |
+          which docker
+          which podman
+          docker version
       - name: Run tests
         run: make test

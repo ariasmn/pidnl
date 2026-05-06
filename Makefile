@@ -41,7 +41,7 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
-CONTAINER_CMD := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo "")
+CONTAINER_CMD := $(shell which docker 2>/dev/null || which podman 2>/dev/null || echo "")
 CONTAINER_IMAGE := ubuntu:25.04
 
 test:
