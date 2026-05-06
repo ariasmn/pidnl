@@ -41,8 +41,35 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
+CONTAINER_CMD := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo "")
+CONTAINER_IMAGE := ubuntu:25.04
+
 test:
-	@if [ "$$(id -u)" -ne 0 ]; then echo "error: tests require root (run with sudo)" && exit 1; fi
-	@bash tests/run.sh
+	@if [ -z "$(CONTAINER_CMD)" ]; then \
+		echo "error: neither docker nor podman found"; \
+		exit 1; \
+	fi
+	@echo "Running tests in $(CONTAINER_IMAGE) via $(CONTAINER_CMD)..."
+	@$(CONTAINER_CMD) run --privileged --rm \
+		-v "$(PWD):/workspace" \
+		-w /workspace \
+		$(CONTAINER_IMAGE) \
+		bash -c ' \
+			set -e; \
+			export DEBIAN_FRONTEND=noninteractive; \
+			apt-get update >/dev/null 2>&1; \
+			apt-get install -y \
+				clang \
+				bpftool \
+				libbpf-dev \
+				libnl-3-dev \
+				libnl-route-3-dev \
+				libelf-dev \
+				libcgroup-dev \
+				netcat-openbsd \
+				make >/dev/null 2>&1; \
+			make dev; \
+			bash tests/run.sh \
+		'
 
 .PHONY: dev clean check-deps lint test
