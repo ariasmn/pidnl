@@ -45,37 +45,35 @@ CONTAINER_CMD := $(shell which docker 2>/dev/null || which podman 2>/dev/null ||
 CONTAINER_IMAGE := ubuntu:25.04
 
 test:
-	@if [ "$$(id -u)" -eq 0 ]; then \
-		echo "Running tests natively (root detected)..."; \
-		bash tests/run.sh; \
-	else \
-		if [ -z "$(CONTAINER_CMD)" ]; then \
-			echo "error: tests require root. Run with sudo, install docker/podman, or use:"; \
-			echo "  podman run --privileged --rm -v \"$$(pwd):/workspace\" -w /workspace $(CONTAINER_IMAGE) bash -c '...'"; \
-			exit 1; \
-		fi; \
-		echo "Running tests in $(CONTAINER_IMAGE) via $(CONTAINER_CMD)..."; \
-		$(CONTAINER_CMD) run --privileged --rm \
-			-v "$(PWD):/workspace" \
-			-w /workspace \
-			$(CONTAINER_IMAGE) \
-			bash -c ' \
-				set -e; \
-				export DEBIAN_FRONTEND=noninteractive; \
-				apt-get update >/dev/null 2>&1; \
-				apt-get install -y \
-					clang \
-					bpftool \
-					libbpf-dev \
-					libnl-3-dev \
-					libnl-route-3-dev \
-					libelf-dev \
-					libcgroup-dev \
-					netcat-openbsd \
-					make >/dev/null 2>&1; \
-				make dev; \
-				bash tests/run.sh \
-			'; \
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: tests must be run as root (try: sudo make test)"; \
+		exit 1; \
 	fi
+	@if [ -z "$(CONTAINER_CMD)" ]; then \
+		echo "error: docker or podman is required to run tests"; \
+		exit 1; \
+	fi
+	@echo "Running tests in $(CONTAINER_IMAGE) via $(CONTAINER_CMD)..."
+	@$(CONTAINER_CMD) run --privileged --cgroupns=host --rm \
+		-v "$(CURDIR):/workspace" \
+		-w /workspace \
+		$(CONTAINER_IMAGE) \
+		bash -c ' \
+			set -e; \
+			export DEBIAN_FRONTEND=noninteractive; \
+			apt-get update >/dev/null 2>&1; \
+			apt-get install -y \
+				clang \
+				bpftool \
+				libbpf-dev \
+				libnl-3-dev \
+				libnl-route-3-dev \
+				libelf-dev \
+				libcgroup-dev \
+				netcat-openbsd \
+				make >/dev/null 2>&1; \
+			make dev; \
+			bash tests/run.sh \
+		'
 
 .PHONY: dev clean check-deps lint test
