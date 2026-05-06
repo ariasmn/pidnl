@@ -29,7 +29,7 @@ check-deps:
 dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 
 dev-gui: clean check-deps $(GUI_BIN)
-	@G_SLICE=always-malloc LSAN_OPTIONS=detect_leaks=0 $(GUI_BIN)
+	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
 
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
