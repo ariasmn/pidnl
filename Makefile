@@ -42,7 +42,7 @@ lint:
 	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
 
 CONTAINER_CMD := $(shell which docker 2>/dev/null || which podman 2>/dev/null || echo "")
-CONTAINER_IMAGE := ubuntu:25.04
+CONTAINER_IMAGE := ubuntu:26.04
 
 test:
 	@if [ "$$(id -u)" -ne 0 ]; then \
