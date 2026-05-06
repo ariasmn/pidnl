@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #define CGROUP_NAME "strait"
@@ -34,10 +33,10 @@ struct rate_limiter {
     int cgroup_fd;
 };
 
-static int get_cgroup2_mount_path(char *buf, size_t size) {
+static int open_cgroup_fd(const char *name) {
+    char path[PATH_MAX];
     FILE *f;
     struct mntent *ent;
-    int found = 0;
 
     f = setmntent(PROC_MOUNTS, "r");
     if (!f) {
@@ -46,26 +45,14 @@ static int get_cgroup2_mount_path(char *buf, size_t size) {
 
     while ((ent = getmntent(f)) != NULL) {
         if (strcmp(ent->mnt_type, CGROUP2_FS) == 0) {
-            snprintf(buf, size, "%s", ent->mnt_dir);
-            found = 1;
-            break;
+            snprintf(path, sizeof(path), "%s/%s", ent->mnt_dir, name);
+            endmntent(f);
+            return open(path, O_RDONLY);
         }
     }
 
     endmntent(f);
-    return found ? 0 : -1;
-}
-
-static int open_cgroup_fd(const char *name) {
-    char path[PATH_MAX];
-
-    if (get_cgroup2_mount_path(path, sizeof(path)) != 0) {
-        return -1;
-    }
-
-    size_t len = strlen(path);
-    snprintf(path + len, sizeof(path) - len, "/%s", name);
-    return open(path, O_RDONLY);
+    return -1;
 }
 
 static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
@@ -83,24 +70,11 @@ static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
         return RATELIMIT_LIBCG_CREATE;
     }
 
-    // libcgroup2 may return success without creating the directory
-    // when no controllers are attached. Ensure it exists.
-    char mount_path[PATH_MAX];
-    char full_path[PATH_MAX];
-    if (get_cgroup2_mount_path(mount_path, sizeof(mount_path)) == 0) {
-        snprintf(full_path, sizeof(full_path), "%s/%s", mount_path, name);
-        if (mkdir(full_path, 0755) != 0 && errno != EEXIST) {
-            cgroup_delete_cgroup(cg, 1);
-            cgroup_free(&cg);
-            return RATELIMIT_LIBCG_CREATE;
-        }
-    }
-
     *out = cg;
     return RATELIMIT_OK;
 }
 
-static void delete_cgroup(struct cgroup *cg, int cgroup_fd, const char *name) {
+static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
     if (cgroup_fd >= 0) {
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
@@ -109,16 +83,6 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd, const char *name) {
 
     if (cg) {
         cgroup_delete_cgroup(cg, 1);
-
-        // libcgroup < 3.0 does not remove empty directories when no
-        // controllers are attached. Clean up manually as a fallback.
-        char mount_path[PATH_MAX];
-        char full_path[PATH_MAX];
-        if (name && get_cgroup2_mount_path(mount_path, sizeof(mount_path)) == 0) {
-            snprintf(full_path, sizeof(full_path), "%s/%s", mount_path, name);
-            rmdir(full_path);
-        }
-
         cgroup_free(&cg);
     }
 }
@@ -222,21 +186,23 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     }
 
     if (cgroup_attach_task_pid(child, pid) != 0) {
-        delete_cgroup(child, -1, name);
+        cgroup_delete_cgroup(child, 1);
+        cgroup_free(&child);
         cgroup_free(&parent);
         return RATELIMIT_LIBCG_ATTACH;
     }
 
     cgroup_fd = open_cgroup_fd(name);
     if (cgroup_fd < 0) {
-        delete_cgroup(child, -1, name);
+        cgroup_delete_cgroup(child, 1);
+        cgroup_free(&child);
         cgroup_free(&parent);
         return RATELIMIT_OPEN_CGROUP;
     }
 
     limiter = calloc(1, sizeof(rate_limiter));
     if (!limiter) {
-        delete_cgroup(child, cgroup_fd, name);
+        delete_cgroup(child, cgroup_fd);
         cgroup_free(&parent);
         return RATELIMIT_ALLOC;
     }
@@ -253,7 +219,7 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
 
     err = attach_bpf_programs(limiter, config);
     if (err != RATELIMIT_OK) {
-        delete_cgroup(limiter->cg, limiter->cgroup_fd, name);
+        delete_cgroup(limiter->cg, limiter->cgroup_fd);
         cgroup_free(&parent);
         free(limiter);
         return err;
@@ -310,7 +276,7 @@ ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
         return RATELIMIT_CGROUP_NOT_FOUND;
     }
 
-    delete_cgroup(cg, cgroup_fd, name);
+    delete_cgroup(cg, cgroup_fd);
     return RATELIMIT_OK;
 }
 
@@ -349,7 +315,7 @@ ratelimit_code ratelimit_cleanup_all(void) {
             }
             if (child_cg) {
                 int cgroup_fd = open_cgroup_fd(name);
-                delete_cgroup(child_cg, cgroup_fd, name);
+                delete_cgroup(child_cg, cgroup_fd);
             }
         }
         ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
@@ -358,7 +324,11 @@ ratelimit_code ratelimit_cleanup_all(void) {
 
     // We removed the children, now we delete the parent cgroup.
     // No need to get the fd since no BPF attached to parent.
-    delete_cgroup(cg, -1, CGROUP_NAME);
+    if (cgroup_delete_cgroup(cg, 1) != 0) {
+        cgroup_free(&cg);
+        return RATELIMIT_LIBCG_DELETE;
+    }
+    cgroup_free(&cg);
 
     monitor_stop();
     return RATELIMIT_OK;
