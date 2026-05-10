@@ -10,7 +10,7 @@ BPF_SRC = lib/src/ratelimit.bpf.c
 BPF_OBJ = $(LIBSRC)/ratelimit.bpf.o
 BPF_SKEL = $(LIBSRC)/ratelimit_bpf.skel.h
 
-GUI_OBJ = gui/main.o
+GUI_OBJ = gui/main.o gui/processes.o
 GUI_BIN = gui/strait-gui
 GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 2>/dev/null)
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 2>/dev/null)
@@ -40,7 +40,7 @@ $(BPF_OBJ): $(BPF_SRC)
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
-$(GUI_BIN): $(GUI_OBJ)
+$(GUI_BIN): $(GUI_OBJ) $(LIBSRC)/discovery.o
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(GUI_LDFLAGS)
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
@@ -50,7 +50,7 @@ cli/%.o: cli/%.c
 	@$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
 
 gui/%.o: gui/%.c
-	@$(CC) $(CFLAGS) $(GUI_CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) $(GUI_CFLAGS) -I$(LIBSRC) -c $< -o $@
 
 clean:
 	@rm -f $(LIBSRC)/*.o cli/*.o gui/*.o $(CLI_BIN) $(GUI_BIN) $(BPF_OBJ) $(BPF_SKEL) 2>/dev/null
