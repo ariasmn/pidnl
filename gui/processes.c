@@ -2,7 +2,6 @@
 #include "discovery.h"
 
 #include <string.h>
-#include <stdlib.h>
 
 #define STRAIT_TYPE_PROCESS (strait_process_get_type())
 G_DECLARE_FINAL_TYPE(StraitProcess, strait_process, STRAIT, PROCESS, GObject)
@@ -43,10 +42,6 @@ static StraitProcess *strait_process_new(
     p->exe_path = g_strdup(exe_path);
     return p;
 }
-
-/* ------------------------------------------------------------------ */
-/* Factories & bindings                                               */
-/* ------------------------------------------------------------------ */
 
 static void setup_label_left(GtkSignalListItemFactory *factory, GObject *object) {
     (void)factory;
@@ -143,16 +138,6 @@ static GtkColumnViewColumn *make_column(
     return col;
 }
 
-/* ------------------------------------------------------------------ */
-/* Data loading                                                       */
-/* ------------------------------------------------------------------ */
-
-static int compare_by_pid(const void *a, const void *b) {
-    const process_info *pa = a;
-    const process_info *pb = b;
-    return (pa->pid > pb->pid) - (pa->pid < pb->pid);
-}
-
 static void clear_store(GListStore *store) {
     guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
     while (n > 0) {
@@ -174,8 +159,6 @@ static void populate_store(GListStore *store) {
         g_warning("Failed to get network processes: %s", discovery_code_string(code));
         return;
     }
-
-    qsort(list->processes, list->count, sizeof(process_info), compare_by_pid);
 
     for (size_t i = 0; i < list->count; i++) {
         process_info *p = &list->processes[i];
@@ -207,10 +190,6 @@ static gboolean on_refresh_timeout(gpointer user_data) {
     populate_store(get_store_from_view(view));
     return G_SOURCE_CONTINUE;
 }
-
-/* ------------------------------------------------------------------ */
-/* Public API                                                         */
-/* ------------------------------------------------------------------ */
 
 GtkWidget *strait_processes_view_new(void) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
