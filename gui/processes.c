@@ -3,9 +3,6 @@
 
 #include <string.h>
 
-#define STRAIT_TYPE_PROCESS (strait_process_get_type())
-G_DECLARE_FINAL_TYPE(StraitProcess, strait_process, STRAIT, PROCESS, GObject)
-
 struct _StraitProcess {
     GObject parent_instance;
     gchar *name;
@@ -43,59 +40,58 @@ static StraitProcess *strait_process_new(
     return p;
 }
 
-static void setup(GtkSignalListItemFactory *f, GObject *o, gpointer min_chars) {
-    (void)f;
+static void
+setup_column_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    gint min_chars = GPOINTER_TO_INT(user_data);
     GtkWidget *insc = gtk_inscription_new(NULL);
-    gtk_inscription_set_min_chars(GTK_INSCRIPTION(insc), GPOINTER_TO_INT(min_chars));
+    gtk_inscription_set_min_chars(GTK_INSCRIPTION(insc), min_chars);
     gtk_inscription_set_xalign(GTK_INSCRIPTION(insc), 0.0);
     gtk_inscription_set_text_overflow(GTK_INSCRIPTION(insc), GTK_INSCRIPTION_OVERFLOW_CLIP);
     gtk_widget_set_hexpand(insc, TRUE);
-    gtk_list_item_set_child(GTK_LIST_ITEM(o), insc);
+    gtk_list_item_set_child(item, insc);
 }
 
-static void bind_name(GtkSignalListItemFactory *f, GObject *o) {
-    (void)f;
-    gtk_inscription_set_text(
-        GTK_INSCRIPTION(gtk_list_item_get_child(GTK_LIST_ITEM(o))),
-        STRAIT_PROCESS(gtk_list_item_get_item(GTK_LIST_ITEM(o)))->name
-    );
+static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->name);
 }
 
-static void bind_pid(GtkSignalListItemFactory *f, GObject *o) {
-    (void)f;
-    gchar *t = g_strdup_printf("%d", STRAIT_PROCESS(gtk_list_item_get_item(GTK_LIST_ITEM(o)))->pid);
-    gtk_inscription_set_text(GTK_INSCRIPTION(gtk_list_item_get_child(GTK_LIST_ITEM(o))), t);
-    g_free(t);
+static void bind_pid_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    g_autofree gchar *t = g_strdup_printf("%d", proc->pid);
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
 }
 
-static void bind_connections(GtkSignalListItemFactory *f, GObject *o) {
-    (void)f;
-    gchar *t = g_strdup_printf(
-        "%d", STRAIT_PROCESS(gtk_list_item_get_item(GTK_LIST_ITEM(o)))->connections
-    );
-    gtk_inscription_set_text(GTK_INSCRIPTION(gtk_list_item_get_child(GTK_LIST_ITEM(o))), t);
-    g_free(t);
+static void bind_connections_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    g_autofree gchar *t = g_strdup_printf("%d", proc->connections);
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
 }
 
-static void bind_protocols(GtkSignalListItemFactory *f, GObject *o) {
-    (void)f;
-    gtk_inscription_set_text(
-        GTK_INSCRIPTION(gtk_list_item_get_child(GTK_LIST_ITEM(o))),
-        STRAIT_PROCESS(gtk_list_item_get_item(GTK_LIST_ITEM(o)))->protocols
-    );
+static void bind_protocols_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->protocols);
 }
 
-static void bind_exe_path(GtkSignalListItemFactory *f, GObject *o) {
-    (void)f;
-    gtk_inscription_set_text(
-        GTK_INSCRIPTION(gtk_list_item_get_child(GTK_LIST_ITEM(o))),
-        STRAIT_PROCESS(gtk_list_item_get_item(GTK_LIST_ITEM(o)))->exe_path
-    );
+static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
 static GtkColumnViewColumn *make_column(const gchar *title, GCallback bind_cb, gint min_chars) {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
-    g_signal_connect(factory, "setup", G_CALLBACK(setup), GINT_TO_POINTER(min_chars));
+    g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), GINT_TO_POINTER(min_chars));
     g_signal_connect(factory, "bind", bind_cb, NULL);
 
     GtkColumnViewColumn *col = gtk_column_view_column_new(title, factory);
@@ -103,12 +99,7 @@ static GtkColumnViewColumn *make_column(const gchar *title, GCallback bind_cb, g
     return col;
 }
 
-static void clear_store(GListStore *store) {
-    guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
-    while (n > 0) {
-        g_list_store_remove(store, --n);
-    }
-}
+static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
 
 static GListStore *get_store_from_view(GtkWidget *view) {
     return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
@@ -140,17 +131,16 @@ static void populate_store(GListStore *store) {
         }
         protocols[sizeof(protocols) - 1] = '\0';
 
-        StraitProcess *proc = strait_process_new(
+        g_autoptr(StraitProcess) proc = strait_process_new(
             p->process_name, (gint)p->pid, p->num_connections, protocols, p->exe_path
         );
         g_list_store_append(store, G_OBJECT(proc));
-        g_object_unref(proc);
     }
 
     destroy_process_list(list);
 }
 
-static gboolean on_refresh_timeout(gpointer user_data) {
+static gboolean on_refresh_timeout_cb(gpointer user_data) {
     GtkWidget *view = GTK_WIDGET(user_data);
     populate_store(get_store_from_view(view));
     return G_SOURCE_CONTINUE;
@@ -159,24 +149,24 @@ static gboolean on_refresh_timeout(gpointer user_data) {
 GtkWidget *strait_processes_view_new(void) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
 
-    GtkNoSelection *selection = gtk_no_selection_new(G_LIST_MODEL(store));
+    g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(store));
     GtkWidget *column_view = gtk_column_view_new(GTK_SELECTION_MODEL(selection));
-    g_object_unref(selection);
 
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Name", G_CALLBACK(bind_name), 20)
+        GTK_COLUMN_VIEW(column_view), make_column("Name", G_CALLBACK(bind_name_cb), 20)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("PID", G_CALLBACK(bind_pid), 6)
+        GTK_COLUMN_VIEW(column_view), make_column("PID", G_CALLBACK(bind_pid_cb), 6)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Connections", G_CALLBACK(bind_connections), 12)
+        GTK_COLUMN_VIEW(column_view),
+        make_column("Connections", G_CALLBACK(bind_connections_cb), 12)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Protocols", G_CALLBACK(bind_protocols), 10)
+        GTK_COLUMN_VIEW(column_view), make_column("Protocols", G_CALLBACK(bind_protocols_cb), 10)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Command Line", G_CALLBACK(bind_exe_path), 30)
+        GTK_COLUMN_VIEW(column_view), make_column("Command Line", G_CALLBACK(bind_exe_path_cb), 30)
     );
 
     GtkWidget *scrolled = gtk_scrolled_window_new();
@@ -199,7 +189,7 @@ void strait_processes_view_refresh(GtkWidget *view) { populate_store(get_store_f
 void strait_processes_view_start_refresh(GtkWidget *view, guint interval_sec) {
     strait_processes_view_stop_refresh(view);
 
-    guint id = g_timeout_add_seconds(interval_sec, on_refresh_timeout, view);
+    guint id = g_timeout_add_seconds(interval_sec, on_refresh_timeout_cb, view);
     g_object_set_data(G_OBJECT(view), "timeout-id", GUINT_TO_POINTER(id));
 }
 

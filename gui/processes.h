@@ -3,6 +3,9 @@
 
 #include <adwaita.h>
 
+#define STRAIT_TYPE_PROCESS (strait_process_get_type())
+G_DECLARE_FINAL_TYPE(StraitProcess, strait_process, STRAIT, PROCESS, GObject)
+
 G_BEGIN_DECLS
 
 GtkWidget *strait_processes_view_new(void);
