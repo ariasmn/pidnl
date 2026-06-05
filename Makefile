@@ -10,6 +10,11 @@ BPF_SRC = lib/src/ratelimit.bpf.c
 BPF_OBJ = $(LIBSRC)/ratelimit.bpf.o
 BPF_SKEL = $(LIBSRC)/ratelimit_bpf.skel.h
 
+GUI_OBJ = gui/main.o gui/processes.o
+GUI_BIN = gui/strait-gui
+GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 2>/dev/null)
+GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 2>/dev/null)
+
 check-deps:
 	@which clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
 	@which bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
@@ -19,7 +24,15 @@ check-deps:
 	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
 
+check-gui-deps:
+	@pkg-config --exists gtk4 2>/dev/null || (echo "gtk4: MISSING" && exit 1)
+	@pkg-config --exists libadwaita-1 2>/dev/null || (echo "libadwaita-1: MISSING" && exit 1)
+
 dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
+
+dev-gui: clean check-deps check-gui-deps $(GUI_BIN)
+	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
+
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
 
@@ -29,17 +42,23 @@ $(BPF_OBJ): $(BPF_SRC)
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
+$(GUI_BIN): $(GUI_OBJ) $(LIBSRC)/discovery.o
+	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(GUI_LDFLAGS)
+
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 cli/%.o: cli/%.c
 	@$(CC) $(CFLAGS) -I$(LIBSRC) -c $< -o $@
 
+gui/%.o: gui/%.c
+	@$(CC) $(CFLAGS) $(GUI_CFLAGS) -I$(LIBSRC) -c $< -o $@
+
 clean:
-	@rm -f $(LIBSRC)/*.o cli/*.o $(CLI_BIN) $(BPF_OBJ) $(BPF_SKEL) 2>/dev/null
+	@rm -f $(LIBSRC)/*.o cli/*.o gui/*.o $(CLI_BIN) $(GUI_BIN) $(BPF_OBJ) $(BPF_SKEL) 2>/dev/null
 
 lint:
-	@clang-format --dry-run --Werror cli/*.c lib/src/*.c
+	@clang-format --dry-run --Werror cli/*.c gui/*.c lib/src/*.c
 
 CONTAINER_CMD := $(shell which docker 2>/dev/null || which podman 2>/dev/null || echo "")
 CONTAINER_IMAGE := ubuntu:26.04
@@ -76,4 +95,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev clean check-deps lint test
+.PHONY: dev dev-gui clean check-deps check-gui-deps lint test

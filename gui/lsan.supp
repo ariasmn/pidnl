@@ -1,0 +1,24 @@
+# LSAN suppressions for GTK4 / libadwaita / GLib known infrastructure leaks.
+# These libraries allocate internal caches that persist for the process lifetime
+# and are not actual memory leaks in application code.
+#
+# LSAN supports suppressing by shared library name using glob patterns.
+
+leak:libfontconfig.so*
+leak:libpango-1.0.so*
+leak:libpangoft2-1.0.so*
+leak:libpangocairo-1.0.so*
+leak:libgtk-4.so*
+leak:libadwaita-1.so*
+leak:libgdk-4.so*
+leak:libgio-2.0.so*
+leak:libgobject-2.0.so*
+leak:libglib-2.0.so*
+leak:libvulkan.so*
+leak:libgraphene-1.0.so*
+leak:libharfbuzz.so*
+leak:libcairo.so*
+leak:libcairo-gobject.so*
+leak:libgdk_pixbuf-2.0.so*
+leak:libgmodule-2.0.so*
+leak:libfreetype.so*
