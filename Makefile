@@ -23,12 +23,14 @@ check-deps:
 	@ldconfig -p 2>/dev/null | grep -q libnl-route-3.so || (echo "libnl-route-3: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
+
+check-gui-deps:
 	@pkg-config --exists gtk4 2>/dev/null || (echo "gtk4: MISSING" && exit 1)
 	@pkg-config --exists libadwaita-1 2>/dev/null || (echo "libadwaita-1: MISSING" && exit 1)
 
 dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 
-dev-gui: clean check-deps $(GUI_BIN)
+dev-gui: clean check-deps check-gui-deps $(GUI_BIN)
 	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
 
 $(BPF_SKEL): $(BPF_OBJ)
@@ -93,4 +95,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev dev-gui clean check-deps lint test
+.PHONY: dev dev-gui clean check-deps check-gui-deps lint test
