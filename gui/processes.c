@@ -12,29 +12,40 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     const gchar *exe_base = exe_path ? strrchr(exe_path, '/') : NULL;
     exe_base = exe_base ? exe_base + 1 : exe_path;
 
-    gchar cgroup_path[64];
-    g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
-    g_autofree gchar *cgroup = NULL;
-    g_file_get_contents(cgroup_path, &cgroup, NULL, NULL);
-
+    // First pass: try to match by executable name
     for (GList *l = all_apps; l; l = l->next) {
         GAppInfo *info = l->data;
         const gchar *exec = g_app_info_get_executable(info);
+        if (!exec)
+            continue;
 
-        if (exec) {
-            const gchar *exec_base = strrchr(exec, '/');
-            exec_base = exec_base ? exec_base + 1 : exec;
+        const gchar *exec_base = strrchr(exec, '/');
+        exec_base = exec_base ? exec_base + 1 : exec;
 
-            if ((exe_base && strcmp(exe_base, exec_base) == 0) ||
-                (process_name && strcmp(process_name, exec_base) == 0))
-                return g_object_ref(g_app_info_get_icon(info));
+        if ((exe_base && strcmp(exe_base, exec_base) == 0) ||
+            (process_name && strcmp(process_name, exec_base) == 0)) {
+            GIcon *icon = g_app_info_get_icon(info);
+            return icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
         }
+    }
 
-        if (cgroup && G_IS_DESKTOP_APP_INFO(info)) {
-            const gchar *flatpak_id =
-                g_desktop_app_info_get_string(G_DESKTOP_APP_INFO(info), "X-Flatpak");
-            if (flatpak_id && strstr(cgroup, flatpak_id))
-                return g_object_ref(g_app_info_get_icon(info));
+    // Second pass: try to match Flatpak apps by cgroup
+    gchar cgroup_path[64];
+    g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
+    g_autofree gchar *cgroup = NULL;
+    if (!g_file_get_contents(cgroup_path, &cgroup, NULL, NULL))
+        return g_themed_icon_new("application-x-executable");
+
+    for (GList *l = all_apps; l; l = l->next) {
+        GAppInfo *info = l->data;
+        if (!G_IS_DESKTOP_APP_INFO(info))
+            continue;
+
+        g_autofree gchar *flatpak_id =
+            g_desktop_app_info_get_string(G_DESKTOP_APP_INFO(info), "X-Flatpak");
+        if (flatpak_id && strstr(cgroup, flatpak_id)) {
+            GIcon *icon = g_app_info_get_icon(info);
+            return icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
         }
     }
 
