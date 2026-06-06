@@ -1,7 +1,56 @@
 #include "processes.h"
 #include "discovery.h"
-
+#include <gio/gdesktopappinfo.h>
 #include <string.h>
+
+static GList *all_apps = NULL;
+
+static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_t pid) {
+    if (!all_apps)
+        all_apps = g_app_info_get_all();
+
+    const gchar *exe_base = exe_path ? strrchr(exe_path, '/') : NULL;
+    exe_base = exe_base ? exe_base + 1 : exe_path;
+
+    // First pass: try to match by executable name
+    for (GList *l = all_apps; l; l = l->next) {
+        GAppInfo *info = l->data;
+        const gchar *exec = g_app_info_get_executable(info);
+        if (!exec)
+            continue;
+
+        const gchar *exec_base = strrchr(exec, '/');
+        exec_base = exec_base ? exec_base + 1 : exec;
+
+        if ((exe_base && strcmp(exe_base, exec_base) == 0) ||
+            (process_name && strcmp(process_name, exec_base) == 0)) {
+            GIcon *icon = g_app_info_get_icon(info);
+            return icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
+        }
+    }
+
+    // Second pass: try to match Flatpak apps by cgroup
+    gchar cgroup_path[64];
+    g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
+    g_autofree gchar *cgroup = NULL;
+    if (!g_file_get_contents(cgroup_path, &cgroup, NULL, NULL))
+        return g_themed_icon_new("application-x-executable");
+
+    for (GList *l = all_apps; l; l = l->next) {
+        GAppInfo *info = l->data;
+        if (!G_IS_DESKTOP_APP_INFO(info))
+            continue;
+
+        g_autofree gchar *flatpak_id =
+            g_desktop_app_info_get_string(G_DESKTOP_APP_INFO(info), "X-Flatpak");
+        if (flatpak_id && strstr(cgroup, flatpak_id)) {
+            GIcon *icon = g_app_info_get_icon(info);
+            return icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
+        }
+    }
+
+    return g_themed_icon_new("application-x-executable");
+}
 
 struct _StraitProcess {
     GObject parent_instance;
@@ -10,6 +59,7 @@ struct _StraitProcess {
     gint connections;
     gchar *protocols;
     gchar *exe_path;
+    GIcon *icon;
 };
 
 G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
@@ -19,6 +69,7 @@ static void strait_process_finalize(GObject *object) {
     g_free(self->name);
     g_free(self->protocols);
     g_free(self->exe_path);
+    g_clear_object(&self->icon);
     G_OBJECT_CLASS(strait_process_parent_class)->finalize(object);
 }
 
@@ -29,7 +80,12 @@ static void strait_process_class_init(StraitProcessClass *klass) {
 static void strait_process_init(StraitProcess *self) { (void)self; }
 
 static StraitProcess *strait_process_new(
-    const gchar *name, gint pid, gint connections, const gchar *protocols, const gchar *exe_path
+    const gchar *name,
+    gint pid,
+    gint connections,
+    const gchar *protocols,
+    const gchar *exe_path,
+    GIcon *icon
 ) {
     StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
@@ -37,6 +93,7 @@ static StraitProcess *strait_process_new(
     p->connections = connections;
     p->protocols = g_strdup(protocols);
     p->exe_path = g_strdup(exe_path);
+    p->icon = icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
     return p;
 }
 
@@ -52,10 +109,34 @@ setup_column_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer u
     gtk_list_item_set_child(item, insc);
 }
 
+static void
+setup_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    (void)user_data;
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+
+    GtkWidget *image = gtk_image_new();
+    gtk_image_set_pixel_size(GTK_IMAGE(image), 16);
+    gtk_box_append(GTK_BOX(box), image);
+
+    GtkWidget *insc = gtk_inscription_new(NULL);
+    gtk_inscription_set_min_chars(GTK_INSCRIPTION(insc), 20);
+    gtk_inscription_set_xalign(GTK_INSCRIPTION(insc), 0.0);
+    gtk_inscription_set_text_overflow(GTK_INSCRIPTION(insc), GTK_INSCRIPTION_OVERFLOW_CLIP);
+    gtk_widget_set_hexpand(insc, TRUE);
+    gtk_box_append(GTK_BOX(box), insc);
+
+    gtk_list_item_set_child(item, box);
+}
+
 static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
-    GtkWidget *insc = gtk_list_item_get_child(item);
+    GtkWidget *box = gtk_list_item_get_child(item);
+    GtkWidget *image = gtk_widget_get_first_child(box);
+    GtkWidget *insc = gtk_widget_get_last_child(box);
+    gtk_image_set_from_gicon(GTK_IMAGE(image), proc->icon);
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->name);
 }
 
@@ -89,9 +170,10 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
-static GtkColumnViewColumn *make_column(const gchar *title, GCallback bind_cb, gint min_chars) {
+static GtkColumnViewColumn *
+make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_chars) {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
-    g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), GINT_TO_POINTER(min_chars));
+    g_signal_connect(factory, "setup", setup_cb, GINT_TO_POINTER(min_chars));
     g_signal_connect(factory, "bind", bind_cb, NULL);
 
     GtkColumnViewColumn *col = gtk_column_view_column_new(title, factory);
@@ -131,8 +213,9 @@ static void populate_store(GListStore *store) {
         }
         protocols[sizeof(protocols) - 1] = '\0';
 
+        g_autoptr(GIcon) icon = lookup_icon(p->exe_path, p->process_name, p->pid);
         g_autoptr(StraitProcess) proc = strait_process_new(
-            p->process_name, (gint)p->pid, p->num_connections, protocols, p->exe_path
+            p->process_name, (gint)p->pid, p->num_connections, protocols, p->exe_path, icon
         );
         g_list_store_append(store, G_OBJECT(proc));
     }
@@ -153,20 +236,24 @@ GtkWidget *strait_processes_view_new(void) {
     GtkWidget *column_view = gtk_column_view_new(GTK_SELECTION_MODEL(selection));
 
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Name", G_CALLBACK(bind_name_cb), 20)
-    );
-    gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("PID", G_CALLBACK(bind_pid_cb), 6)
+        GTK_COLUMN_VIEW(column_view),
+        make_column("Name", G_CALLBACK(setup_name_cb), G_CALLBACK(bind_name_cb), 0)
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Connections", G_CALLBACK(bind_connections_cb), 12)
+        make_column("PID", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_pid_cb), 10)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Protocols", G_CALLBACK(bind_protocols_cb), 10)
+        GTK_COLUMN_VIEW(column_view),
+        make_column("Connections", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_connections_cb), 12)
     );
     gtk_column_view_append_column(
-        GTK_COLUMN_VIEW(column_view), make_column("Command Line", G_CALLBACK(bind_exe_path_cb), 30)
+        GTK_COLUMN_VIEW(column_view),
+        make_column("Protocols", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_protocols_cb), 10)
+    );
+    gtk_column_view_append_column(
+        GTK_COLUMN_VIEW(column_view),
+        make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
     );
 
     GtkWidget *scrolled = gtk_scrolled_window_new();
