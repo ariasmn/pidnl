@@ -1,6 +1,5 @@
 #include "processes.h"
 #include "discovery.h"
-
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
 
@@ -231,7 +230,7 @@ GtkWidget *strait_processes_view_new(void) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("PID", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_pid_cb), 6)
+        make_column("PID", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_pid_cb), 10)
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
