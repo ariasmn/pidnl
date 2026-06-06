@@ -12,8 +12,8 @@ BPF_SKEL = $(LIBSRC)/ratelimit_bpf.skel.h
 
 GUI_OBJ = gui/main.o gui/processes.o
 GUI_BIN = gui/strait-gui
-GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 2>/dev/null)
-GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 2>/dev/null)
+GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
+GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 
 check-deps:
 	@which clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
