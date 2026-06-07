@@ -30,7 +30,7 @@ check-gui-deps:
 
 dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 
-dev-gui: clean check-deps check-gui-deps $(GUI_BIN)
+dev-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
 
 $(BPF_SKEL): $(BPF_OBJ)
@@ -42,8 +42,10 @@ $(BPF_OBJ): $(BPF_SRC)
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
 
-$(GUI_BIN): $(GUI_OBJ) $(LIBSRC)/discovery.o
-	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(GUI_LDFLAGS)
+$(GUI_BIN): $(GUI_OBJ) $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o | $(BPF_SKEL)
+	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(GUI_LDFLAGS) -lbpf -lelf -lcgroup
+
+$(LIBSRC)/ratelimit.o: $(BPF_SKEL)
 
 $(LIBSRC)/%.o: $(LIBSRC)/%.c
 	@$(CC) $(CFLAGS) -c $< -o $@

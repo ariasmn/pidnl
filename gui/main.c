@@ -1,7 +1,45 @@
 #include <adwaita.h>
 #include <glib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
+#include "discovery.h"
 #include "processes.h"
+#include "ratelimit.h"
+
+#define STRAIT_DUMP_ALL "--strait-dump-all"
+
+static int dump_all(void) {
+    ratelimit_init();
+
+    process_list *list = NULL;
+    if (get_network_processes(&list) != DISCOVERY_OK) {
+        return EXIT_FAILURE;
+    }
+
+    printf("%zu\n", list->count);
+    for (size_t i = 0; i < list->count; i++) {
+        uint64_t upload = 0;
+        uint64_t download = 0;
+        get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
+        printf(
+            "%d %d %d %d %lu %lu %s\n%s\n",
+            list->processes[i].pid,
+            list->processes[i].num_connections,
+            list->processes[i].has_tcp,
+            list->processes[i].has_udp,
+            (unsigned long)upload,
+            (unsigned long)download,
+            list->processes[i].process_name,
+            list->processes[i].exe_path
+        );
+    }
+
+    destroy_process_list(list);
+    return EXIT_SUCCESS;
+}
 
 static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
@@ -49,6 +87,10 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], STRAIT_DUMP_ALL) == 0) {
+        return dump_all();
+    }
+
     AdwApplication *app = adw_application_new("com.example.strait", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
     int status = g_application_run(G_APPLICATION(app), argc, argv);

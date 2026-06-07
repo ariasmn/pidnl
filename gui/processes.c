@@ -1,7 +1,9 @@
 #include "processes.h"
 #include "discovery.h"
+#include "ratelimit.h"
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
+#include <unistd.h>
 
 static GList *all_apps = NULL;
 
@@ -60,6 +62,8 @@ struct _StraitProcess {
     gchar *protocols;
     gchar *exe_path;
     GIcon *icon;
+    guint64 upload_bps;
+    guint64 download_bps;
 };
 
 G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
@@ -85,7 +89,9 @@ static StraitProcess *strait_process_new(
     gint connections,
     const gchar *protocols,
     const gchar *exe_path,
-    GIcon *icon
+    GIcon *icon,
+    guint64 upload_bps,
+    guint64 download_bps
 ) {
     StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
@@ -94,6 +100,8 @@ static StraitProcess *strait_process_new(
     p->protocols = g_strdup(protocols);
     p->exe_path = g_strdup(exe_path);
     p->icon = icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
+    p->upload_bps = upload_bps;
+    p->download_bps = download_bps;
     return p;
 }
 
@@ -170,6 +178,23 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
+static void bind_limits_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+
+    g_autofree gchar *t;
+    if (proc->upload_bps == 0 && proc->download_bps == 0) {
+        t = g_strdup("-");
+    } else {
+        guint64 upload_kbps = (proc->upload_bps * 8) / 1000;
+        guint64 download_kbps = (proc->download_bps * 8) / 1000;
+        t = g_strdup_printf("%lu / %lu", (unsigned long)upload_kbps, (unsigned long)download_kbps);
+    }
+
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+}
+
 static GtkColumnViewColumn *
 make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_chars) {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
@@ -181,6 +206,138 @@ make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_
     return col;
 }
 
+static void append_process_to_store(
+    GListStore *store,
+    const char *name,
+    pid_t pid,
+    int connections,
+    int has_tcp,
+    int has_udp,
+    const char *exe_path,
+    guint64 upload_bps,
+    guint64 download_bps
+) {
+    const char *protocols;
+    if (has_tcp && has_udp)
+        protocols = "TCP/UDP";
+    else if (has_tcp)
+        protocols = "TCP";
+    else if (has_udp)
+        protocols = "UDP";
+    else
+        protocols = "-";
+
+    g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
+    g_autoptr(StraitProcess) proc = strait_process_new(
+        name, (gint)pid, connections, protocols, exe_path, icon, upload_bps, download_bps
+    );
+    g_list_store_append(store, G_OBJECT(proc));
+}
+
+static void fetch_all_via_pkexec(GListStore *store) {
+    gchar *self_exe = g_file_read_link("/proc/self/exe", NULL);
+    if (!self_exe)
+        return;
+
+    gchar *argv[] = {"pkexec", self_exe, "--strait-dump-all", NULL};
+    gchar *stdout_data = NULL;
+    gint exit_status = 0;
+    GError *error = NULL;
+
+    gboolean spawn_ok = g_spawn_sync(
+        NULL,
+        argv,
+        NULL,
+        G_SPAWN_STDERR_TO_DEV_NULL | G_SPAWN_SEARCH_PATH,
+        NULL,
+        NULL,
+        &stdout_data,
+        NULL,
+        &exit_status,
+        &error
+    );
+    g_free(self_exe);
+
+    if (!spawn_ok || !stdout_data || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) != 0)) {
+        g_free(stdout_data);
+        if (error)
+            g_error_free(error);
+        return;
+    }
+
+    gchar **lines = g_strsplit(stdout_data, "\n", -1);
+    g_free(stdout_data);
+
+    if (!lines[0] || !*lines[0]) {
+        g_strfreev(lines);
+        return;
+    }
+
+    int count = atoi(lines[0]);
+    if (count <= 0) {
+        g_strfreev(lines);
+        return;
+    }
+
+    int idx = 1;
+    for (int i = 0; i < count && lines[idx] && lines[idx + 1]; i++) {
+        int pid, connections, has_tcp, has_udp;
+        unsigned long upload, download;
+        char name[TS_COMM_LEN] = {0};
+        if (sscanf(
+                lines[idx],
+                "%d %d %d %d %lu %lu %[^\n]",
+                &pid,
+                &connections,
+                &has_tcp,
+                &has_udp,
+                &upload,
+                &download,
+                name
+            ) == 7) {
+            append_process_to_store(
+                store,
+                name,
+                (pid_t)pid,
+                connections,
+                has_tcp,
+                has_udp,
+                lines[idx + 1],
+                upload,
+                download
+            );
+        }
+        idx += 2;
+    }
+
+    g_strfreev(lines);
+}
+
+static void populate_from_root(GListStore *store) {
+    process_list *list = NULL;
+    if (get_network_processes(&list) != DISCOVERY_OK) {
+        g_warning("Failed to get network processes");
+        return;
+    }
+    for (size_t i = 0; i < list->count; i++) {
+        process_info *p = &list->processes[i];
+        uint64_t upload = 0, download = 0;
+        get_rate_limits_from_cgroup(p->pid, &upload, &download);
+        append_process_to_store(
+            store,
+            p->process_name,
+            p->pid,
+            p->num_connections,
+            p->has_tcp,
+            p->has_udp,
+            p->exe_path,
+            upload,
+            download
+        );
+    }
+    destroy_process_list(list);
+}
+
 static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
 
 static GListStore *get_store_from_view(GtkWidget *view) {
@@ -188,45 +345,13 @@ static GListStore *get_store_from_view(GtkWidget *view) {
 }
 
 static void populate_store(GListStore *store) {
-    process_list *list = NULL;
-    discovery_code code = get_network_processes(&list);
-
     clear_store(store);
 
-    if (code != DISCOVERY_OK) {
-        g_warning("Failed to get network processes: %s", discovery_code_string(code));
-        return;
+    if (geteuid() == 0) {
+        populate_from_root(store);
+    } else {
+        fetch_all_via_pkexec(store);
     }
-
-    for (size_t i = 0; i < list->count; i++) {
-        process_info *p = &list->processes[i];
-        char protocols[16];
-
-        if (p->has_tcp && p->has_udp) {
-            strncpy(protocols, "TCP/UDP", sizeof(protocols) - 1);
-        } else if (p->has_tcp) {
-            strncpy(protocols, "TCP", sizeof(protocols) - 1);
-        } else if (p->has_udp) {
-            strncpy(protocols, "UDP", sizeof(protocols) - 1);
-        } else {
-            strncpy(protocols, "-", sizeof(protocols) - 1);
-        }
-        protocols[sizeof(protocols) - 1] = '\0';
-
-        g_autoptr(GIcon) icon = lookup_icon(p->exe_path, p->process_name, p->pid);
-        g_autoptr(StraitProcess) proc = strait_process_new(
-            p->process_name, (gint)p->pid, p->num_connections, protocols, p->exe_path, icon
-        );
-        g_list_store_append(store, G_OBJECT(proc));
-    }
-
-    destroy_process_list(list);
-}
-
-static gboolean on_refresh_timeout_cb(gpointer user_data) {
-    GtkWidget *view = GTK_WIDGET(user_data);
-    populate_store(get_store_from_view(view));
-    return G_SOURCE_CONTINUE;
 }
 
 GtkWidget *strait_processes_view_new(void) {
@@ -253,6 +378,10 @@ GtkWidget *strait_processes_view_new(void) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
+        make_column("Limits", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_limits_cb), 18)
+    );
+    gtk_column_view_append_column(
+        GTK_COLUMN_VIEW(column_view),
         make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
     );
 
@@ -274,16 +403,8 @@ GtkWidget *strait_processes_view_new(void) {
 void strait_processes_view_refresh(GtkWidget *view) { populate_store(get_store_from_view(view)); }
 
 void strait_processes_view_start_refresh(GtkWidget *view, guint interval_sec) {
-    strait_processes_view_stop_refresh(view);
-
-    guint id = g_timeout_add_seconds(interval_sec, on_refresh_timeout_cb, view);
-    g_object_set_data(G_OBJECT(view), "timeout-id", GUINT_TO_POINTER(id));
+    (void)view;
+    (void)interval_sec;
 }
 
-void strait_processes_view_stop_refresh(GtkWidget *view) {
-    guint id = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(view), "timeout-id"));
-    if (id != 0) {
-        g_source_remove(id);
-        g_object_set_data(G_OBJECT(view), "timeout-id", GUINT_TO_POINTER(0));
-    }
-}
+void strait_processes_view_stop_refresh(GtkWidget *view) { (void)view; }
