@@ -3,15 +3,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "discovery.h"
 #include "processes.h"
 #include "ratelimit.h"
 
-#define STRAIT_DUMP_ALL "--strait-dump-all"
+#define STRAIT_PRIVILEGED "--strait-privileged"
 
-static int dump_all(void) {
+static int run_privileged(void) {
     ratelimit_init();
 
     process_list *list = NULL;
@@ -41,6 +40,40 @@ static int dump_all(void) {
     return EXIT_SUCCESS;
 }
 
+static gchar *fetch_processes(GtkApplication *app) {
+    gchar *self_exe = g_file_read_link("/proc/self/exe", NULL);
+    if (!self_exe) {
+        g_application_quit(G_APPLICATION(app));
+        return NULL;
+    }
+
+    gchar *argv[] = {"pkexec", self_exe, STRAIT_PRIVILEGED, NULL};
+    gchar *stdout_data = NULL;
+    gint exit_status = 0;
+
+    gboolean ok = g_spawn_sync(
+        NULL,
+        argv,
+        NULL,
+        G_SPAWN_STDERR_TO_DEV_NULL | G_SPAWN_SEARCH_PATH,
+        NULL,
+        NULL,
+        &stdout_data,
+        NULL,
+        &exit_status,
+        NULL
+    );
+    g_free(self_exe);
+
+    if (!ok || !stdout_data || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) != 0)) {
+        g_free(stdout_data);
+        g_application_quit(G_APPLICATION(app));
+        return NULL;
+    }
+
+    return stdout_data;
+}
+
 static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
     GtkWidget *view = GTK_WIDGET(user_data);
@@ -58,6 +91,10 @@ static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
 static void on_activate(GtkApplication *app, gpointer user_data) {
     (void)user_data;
 
+    gchar *raw_data = fetch_processes(app);
+    if (!raw_data)
+        return;
+
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(app));
     gtk_window_set_title(GTK_WINDOW(window), "Strait");
     gtk_window_set_default_size(GTK_WINDOW(window), 900, 600);
@@ -72,7 +109,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
     gtk_widget_set_tooltip_text(refresh_button, "Refresh");
 
-    GtkWidget *processes_view = strait_processes_view_new();
+    GtkWidget *processes_view = strait_processes_view_new(raw_data);
     g_object_set_data(G_OBJECT(window), "processes-view", processes_view);
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), processes_view);
     adw_header_bar_pack_end(header_bar, refresh_button);
@@ -84,11 +121,12 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     gtk_window_present(GTK_WINDOW(window));
 
     strait_processes_view_start_refresh(processes_view, 5);
+    g_free(raw_data);
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && strcmp(argv[1], STRAIT_DUMP_ALL) == 0) {
-        return dump_all();
+    if (argc == 2 && strcmp(argv[1], STRAIT_PRIVILEGED) == 0) {
+        return run_privileged();
     }
 
     AdwApplication *app = adw_application_new("com.example.strait", G_APPLICATION_DEFAULT_FLAGS);

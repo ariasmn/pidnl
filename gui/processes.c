@@ -1,9 +1,6 @@
 #include "processes.h"
-#include "discovery.h"
-#include "ratelimit.h"
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
-#include <unistd.h>
 
 static GList *all_apps = NULL;
 
@@ -14,7 +11,6 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     const gchar *exe_base = exe_path ? strrchr(exe_path, '/') : NULL;
     exe_base = exe_base ? exe_base + 1 : exe_path;
 
-    // First pass: try to match by executable name
     for (GList *l = all_apps; l; l = l->next) {
         GAppInfo *info = l->data;
         const gchar *exec = g_app_info_get_executable(info);
@@ -31,7 +27,6 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
         }
     }
 
-    // Second pass: try to match Flatpak apps by cgroup
     gchar cgroup_path[64];
     g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
     g_autofree gchar *cgroup = NULL;
@@ -234,40 +229,16 @@ static void append_process_to_store(
     g_list_store_append(store, G_OBJECT(proc));
 }
 
-static void fetch_all_via_pkexec(GListStore *store) {
-    gchar *self_exe = g_file_read_link("/proc/self/exe", NULL);
-    if (!self_exe)
-        return;
+static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
 
-    gchar *argv[] = {"pkexec", self_exe, "--strait-dump-all", NULL};
-    gchar *stdout_data = NULL;
-    gint exit_status = 0;
-    GError *error = NULL;
+static GListStore *get_store_from_view(GtkWidget *view) {
+    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
+}
 
-    gboolean spawn_ok = g_spawn_sync(
-        NULL,
-        argv,
-        NULL,
-        G_SPAWN_STDERR_TO_DEV_NULL | G_SPAWN_SEARCH_PATH,
-        NULL,
-        NULL,
-        &stdout_data,
-        NULL,
-        &exit_status,
-        &error
-    );
-    g_free(self_exe);
+static void populate_store_from_raw(GListStore *store, const gchar *data) {
+    clear_store(store);
 
-    if (!spawn_ok || !stdout_data || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) != 0)) {
-        g_free(stdout_data);
-        if (error)
-            g_error_free(error);
-        return;
-    }
-
-    gchar **lines = g_strsplit(stdout_data, "\n", -1);
-    g_free(stdout_data);
-
+    gchar **lines = g_strsplit(data, "\n", -1);
     if (!lines[0] || !*lines[0]) {
         g_strfreev(lines);
         return;
@@ -283,10 +254,10 @@ static void fetch_all_via_pkexec(GListStore *store) {
     for (int i = 0; i < count && lines[idx] && lines[idx + 1]; i++) {
         int pid, connections, has_tcp, has_udp;
         unsigned long upload, download;
-        char name[TS_COMM_LEN] = {0};
+        char name[256] = {0};
         if (sscanf(
                 lines[idx],
-                "%d %d %d %d %lu %lu %[^\n]",
+                "%d %d %d %d %lu %lu %255[^\n]",
                 &pid,
                 &connections,
                 &has_tcp,
@@ -313,48 +284,7 @@ static void fetch_all_via_pkexec(GListStore *store) {
     g_strfreev(lines);
 }
 
-static void populate_from_root(GListStore *store) {
-    process_list *list = NULL;
-    if (get_network_processes(&list) != DISCOVERY_OK) {
-        g_warning("Failed to get network processes");
-        return;
-    }
-    for (size_t i = 0; i < list->count; i++) {
-        process_info *p = &list->processes[i];
-        uint64_t upload = 0, download = 0;
-        get_rate_limits_from_cgroup(p->pid, &upload, &download);
-        append_process_to_store(
-            store,
-            p->process_name,
-            p->pid,
-            p->num_connections,
-            p->has_tcp,
-            p->has_udp,
-            p->exe_path,
-            upload,
-            download
-        );
-    }
-    destroy_process_list(list);
-}
-
-static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
-
-static GListStore *get_store_from_view(GtkWidget *view) {
-    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
-}
-
-static void populate_store(GListStore *store) {
-    clear_store(store);
-
-    if (geteuid() == 0) {
-        populate_from_root(store);
-    } else {
-        fetch_all_via_pkexec(store);
-    }
-}
-
-GtkWidget *strait_processes_view_new(void) {
+GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
 
     g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(store));
@@ -394,13 +324,17 @@ GtkWidget *strait_processes_view_new(void) {
     gtk_widget_set_hexpand(scrolled, TRUE);
 
     g_object_set_data_full(G_OBJECT(scrolled), "store", store, g_object_unref);
-
-    populate_store(store);
+    g_object_set_data_full(G_OBJECT(scrolled), "raw-data", g_strdup(raw_data), g_free);
+    populate_store_from_raw(store, raw_data);
 
     return scrolled;
 }
 
-void strait_processes_view_refresh(GtkWidget *view) { populate_store(get_store_from_view(view)); }
+void strait_processes_view_refresh(GtkWidget *view) {
+    GListStore *store = get_store_from_view(view);
+    const gchar *raw_data = g_object_get_data(G_OBJECT(view), "raw-data");
+    populate_store_from_raw(store, raw_data);
+}
 
 void strait_processes_view_start_refresh(GtkWidget *view, guint interval_sec) {
     (void)view;
