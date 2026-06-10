@@ -1,5 +1,4 @@
 #include "processes.h"
-#include "discovery.h"
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
 
@@ -12,7 +11,6 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     const gchar *exe_base = exe_path ? strrchr(exe_path, '/') : NULL;
     exe_base = exe_base ? exe_base + 1 : exe_path;
 
-    // First pass: try to match by executable name
     for (GList *l = all_apps; l; l = l->next) {
         GAppInfo *info = l->data;
         const gchar *exec = g_app_info_get_executable(info);
@@ -29,7 +27,6 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
         }
     }
 
-    // Second pass: try to match Flatpak apps by cgroup
     gchar cgroup_path[64];
     g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
     g_autofree gchar *cgroup = NULL;
@@ -60,6 +57,8 @@ struct _StraitProcess {
     gchar *protocols;
     gchar *exe_path;
     GIcon *icon;
+    guint64 upload_bps;
+    guint64 download_bps;
 };
 
 G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
@@ -85,7 +84,9 @@ static StraitProcess *strait_process_new(
     gint connections,
     const gchar *protocols,
     const gchar *exe_path,
-    GIcon *icon
+    GIcon *icon,
+    guint64 upload_bps,
+    guint64 download_bps
 ) {
     StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
@@ -94,6 +95,8 @@ static StraitProcess *strait_process_new(
     p->protocols = g_strdup(protocols);
     p->exe_path = g_strdup(exe_path);
     p->icon = icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
+    p->upload_bps = upload_bps;
+    p->download_bps = download_bps;
     return p;
 }
 
@@ -170,6 +173,23 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
+static void bind_limits_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+
+    g_autofree gchar *t;
+    if (proc->upload_bps == 0 && proc->download_bps == 0) {
+        t = g_strdup("-");
+    } else {
+        guint64 upload_kbps = (proc->upload_bps * 8) / 1000;
+        guint64 download_kbps = (proc->download_bps * 8) / 1000;
+        t = g_strdup_printf("%lu / %lu", (unsigned long)upload_kbps, (unsigned long)download_kbps);
+    }
+
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+}
+
 static GtkColumnViewColumn *
 make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_chars) {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
@@ -181,55 +201,90 @@ make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_
     return col;
 }
 
+static void append_process_to_store(
+    GListStore *store,
+    const char *name,
+    pid_t pid,
+    int connections,
+    int has_tcp,
+    int has_udp,
+    const char *exe_path,
+    guint64 upload_bps,
+    guint64 download_bps
+) {
+    const char *protocols;
+    if (has_tcp && has_udp)
+        protocols = "TCP/UDP";
+    else if (has_tcp)
+        protocols = "TCP";
+    else if (has_udp)
+        protocols = "UDP";
+    else
+        protocols = "-";
+
+    g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
+    g_autoptr(StraitProcess) proc = strait_process_new(
+        name, (gint)pid, connections, protocols, exe_path, icon, upload_bps, download_bps
+    );
+    g_list_store_append(store, G_OBJECT(proc));
+}
+
 static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
 
 static GListStore *get_store_from_view(GtkWidget *view) {
     return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
 }
 
-static void populate_store(GListStore *store) {
-    process_list *list = NULL;
-    discovery_code code = get_network_processes(&list);
-
+static void populate_store_from_raw(GListStore *store, const gchar *data) {
     clear_store(store);
 
-    if (code != DISCOVERY_OK) {
-        g_warning("Failed to get network processes: %s", discovery_code_string(code));
+    gchar **lines = g_strsplit(data, "\n", -1);
+    if (!lines[0] || !*lines[0]) {
+        g_strfreev(lines);
         return;
     }
 
-    for (size_t i = 0; i < list->count; i++) {
-        process_info *p = &list->processes[i];
-        char protocols[16];
-
-        if (p->has_tcp && p->has_udp) {
-            strncpy(protocols, "TCP/UDP", sizeof(protocols) - 1);
-        } else if (p->has_tcp) {
-            strncpy(protocols, "TCP", sizeof(protocols) - 1);
-        } else if (p->has_udp) {
-            strncpy(protocols, "UDP", sizeof(protocols) - 1);
-        } else {
-            strncpy(protocols, "-", sizeof(protocols) - 1);
-        }
-        protocols[sizeof(protocols) - 1] = '\0';
-
-        g_autoptr(GIcon) icon = lookup_icon(p->exe_path, p->process_name, p->pid);
-        g_autoptr(StraitProcess) proc = strait_process_new(
-            p->process_name, (gint)p->pid, p->num_connections, protocols, p->exe_path, icon
-        );
-        g_list_store_append(store, G_OBJECT(proc));
+    int count = atoi(lines[0]);
+    if (count <= 0) {
+        g_strfreev(lines);
+        return;
     }
 
-    destroy_process_list(list);
+    int idx = 1;
+    for (int i = 0; i < count && lines[idx] && lines[idx + 1]; i++) {
+        int pid, connections, has_tcp, has_udp;
+        unsigned long upload, download;
+        char name[256] = {0};
+        if (sscanf(
+                lines[idx],
+                "%d %d %d %d %lu %lu %255[^\n]",
+                &pid,
+                &connections,
+                &has_tcp,
+                &has_udp,
+                &upload,
+                &download,
+                name
+            ) == 7) {
+            append_process_to_store(
+                store,
+                name,
+                (pid_t)pid,
+                connections,
+                has_tcp,
+                has_udp,
+                lines[idx + 1],
+                upload,
+                download
+            );
+        }
+        idx += 2;
+    }
+
+    g_strfreev(lines);
 }
 
-static gboolean on_refresh_timeout_cb(gpointer user_data) {
-    GtkWidget *view = GTK_WIDGET(user_data);
-    populate_store(get_store_from_view(view));
-    return G_SOURCE_CONTINUE;
-}
-
-GtkWidget *strait_processes_view_new(void) {
+GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
 
     g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(store));
@@ -253,6 +308,10 @@ GtkWidget *strait_processes_view_new(void) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
+        make_column("Limits", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_limits_cb), 18)
+    );
+    gtk_column_view_append_column(
+        GTK_COLUMN_VIEW(column_view),
         make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
     );
 
@@ -265,25 +324,13 @@ GtkWidget *strait_processes_view_new(void) {
     gtk_widget_set_hexpand(scrolled, TRUE);
 
     g_object_set_data_full(G_OBJECT(scrolled), "store", store, g_object_unref);
-
-    populate_store(store);
+    g_object_set_data_full(G_OBJECT(scrolled), "raw-data", g_strdup(raw_data), g_free);
+    populate_store_from_raw(store, raw_data);
 
     return scrolled;
 }
 
-void strait_processes_view_refresh(GtkWidget *view) { populate_store(get_store_from_view(view)); }
-
-void strait_processes_view_start_refresh(GtkWidget *view, guint interval_sec) {
-    strait_processes_view_stop_refresh(view);
-
-    guint id = g_timeout_add_seconds(interval_sec, on_refresh_timeout_cb, view);
-    g_object_set_data(G_OBJECT(view), "timeout-id", GUINT_TO_POINTER(id));
-}
-
-void strait_processes_view_stop_refresh(GtkWidget *view) {
-    guint id = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(view), "timeout-id"));
-    if (id != 0) {
-        g_source_remove(id);
-        g_object_set_data(G_OBJECT(view), "timeout-id", GUINT_TO_POINTER(0));
-    }
+void strait_processes_view_refresh(GtkWidget *view, const gchar *raw_data) {
+    GListStore *store = get_store_from_view(view);
+    populate_store_from_raw(store, raw_data);
 }
