@@ -48,7 +48,7 @@ static int run_privileged(void) {
 
     printf("%s\n", BACKEND_RESPONSE_READY);
 
-    char line[1024];
+    char line[64];
     while (fgets(line, sizeof(line), stdin)) {
         size_t len = strlen(line);
         if (len > 0 && line[len - 1] == '\n')
