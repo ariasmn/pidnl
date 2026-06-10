@@ -330,15 +330,7 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     return scrolled;
 }
 
-void strait_processes_view_refresh(GtkWidget *view) {
+void strait_processes_view_refresh(GtkWidget *view, const gchar *raw_data) {
     GListStore *store = get_store_from_view(view);
-    const gchar *raw_data = g_object_get_data(G_OBJECT(view), "raw-data");
     populate_store_from_raw(store, raw_data);
 }
-
-void strait_processes_view_start_refresh(GtkWidget *view, guint interval_sec) {
-    (void)view;
-    (void)interval_sec;
-}
-
-void strait_processes_view_stop_refresh(GtkWidget *view) { (void)view; }

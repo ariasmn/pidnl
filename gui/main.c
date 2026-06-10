@@ -4,86 +4,97 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "backend.h"
 #include "discovery.h"
 #include "processes.h"
 #include "ratelimit.h"
 
 #define STRAIT_PRIVILEGED "--strait-privileged"
 
+static StraitBackend *backend = NULL;
+
 static int run_privileged(void) {
     ratelimit_init();
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    process_list *list = NULL;
-    if (get_network_processes(&list) != DISCOVERY_OK) {
-        return EXIT_FAILURE;
+    printf("%s\n", BACKEND_RESPONSE_READY);
+
+    char line[1024];
+    while (fgets(line, sizeof(line), stdin)) {
+        size_t len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n')
+            line[len - 1] = '\0';
+
+        if (strcmp(line, BACKEND_CMD_LIST) == 0) {
+            process_list *list = NULL;
+            if (get_network_processes(&list) != DISCOVERY_OK) {
+                printf("%s\n", BACKEND_RESPONSE_ERROR);
+                fflush(stdout);
+                continue;
+            }
+
+            printf("%zu\n", list->count);
+            for (size_t i = 0; i < list->count; i++) {
+                uint64_t upload = 0;
+                uint64_t download = 0;
+                get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
+                printf(
+                    "%d %d %d %d %lu %lu %s\n%s\n",
+                    list->processes[i].pid,
+                    list->processes[i].num_connections,
+                    list->processes[i].has_tcp,
+                    list->processes[i].has_udp,
+                    (unsigned long)upload,
+                    (unsigned long)download,
+                    list->processes[i].process_name,
+                    list->processes[i].exe_path
+                );
+            }
+            fflush(stdout);
+            destroy_process_list(list);
+        } else if (strncmp(line, BACKEND_CMD_SET_LIMIT, strlen(BACKEND_CMD_SET_LIMIT)) == 0) {
+            int pid;
+            uint64_t upload, download;
+            if (sscanf(
+                    line + strlen(BACKEND_CMD_SET_LIMIT) + 1, "%d %lu %lu", &pid, &upload, &download
+                ) == 3) {
+                rate_limit_config config = {
+                    .upload_kbps = (uint32_t)(upload / 1000),
+                    .download_kbps = (uint32_t)(download / 1000)
+                };
+                if (limit_process_bandwidth(pid, config) == RATELIMIT_OK) {
+                    printf("%s\n", BACKEND_RESPONSE_OK);
+                } else {
+                    printf("%s\n", BACKEND_RESPONSE_ERROR);
+                }
+            } else {
+                printf("%s\n", BACKEND_RESPONSE_ERROR);
+            }
+            fflush(stdout);
+        } else if (strcmp(line, BACKEND_CMD_QUIT) == 0) {
+            break;
+        }
     }
 
-    printf("%zu\n", list->count);
-    for (size_t i = 0; i < list->count; i++) {
-        uint64_t upload = 0;
-        uint64_t download = 0;
-        get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
-        printf(
-            "%d %d %d %d %lu %lu %s\n%s\n",
-            list->processes[i].pid,
-            list->processes[i].num_connections,
-            list->processes[i].has_tcp,
-            list->processes[i].has_udp,
-            (unsigned long)upload,
-            (unsigned long)download,
-            list->processes[i].process_name,
-            list->processes[i].exe_path
-        );
-    }
-
-    destroy_process_list(list);
     return EXIT_SUCCESS;
-}
-
-static gchar *fetch_processes(GtkApplication *app) {
-    gchar *self_exe = g_file_read_link("/proc/self/exe", NULL);
-    if (!self_exe) {
-        g_application_quit(G_APPLICATION(app));
-        return NULL;
-    }
-
-    gchar *argv[] = {"pkexec", self_exe, STRAIT_PRIVILEGED, NULL};
-    gchar *stdout_data = NULL;
-    gint exit_status = 0;
-
-    gboolean ok = g_spawn_sync(
-        NULL,
-        argv,
-        NULL,
-        G_SPAWN_STDERR_TO_DEV_NULL | G_SPAWN_SEARCH_PATH,
-        NULL,
-        NULL,
-        &stdout_data,
-        NULL,
-        &exit_status,
-        NULL
-    );
-    g_free(self_exe);
-
-    if (!ok || !stdout_data || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) != 0)) {
-        g_free(stdout_data);
-        g_application_quit(G_APPLICATION(app));
-        return NULL;
-    }
-
-    return stdout_data;
 }
 
 static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
     (void)button;
     GtkWidget *view = GTK_WIDGET(user_data);
-    strait_processes_view_refresh(view);
+
+    gchar *raw_data = backend_list(backend);
+    if (raw_data) {
+        strait_processes_view_refresh(view, raw_data);
+        g_free(raw_data);
+    }
 }
 
 static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
+    (void)window;
     GtkApplication *app = GTK_APPLICATION(user_data);
-    GtkWidget *view = GTK_WIDGET(g_object_get_data(G_OBJECT(window), "processes-view"));
-    strait_processes_view_stop_refresh(view);
+    backend_stop(backend);
+    backend = NULL;
     g_application_quit(G_APPLICATION(app));
     return TRUE;
 }
@@ -91,9 +102,26 @@ static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
 static void on_activate(GtkApplication *app, gpointer user_data) {
     (void)user_data;
 
-    gchar *raw_data = fetch_processes(app);
-    if (!raw_data)
+    gchar *self_exe = g_file_read_link("/proc/self/exe", NULL);
+    if (!self_exe) {
+        g_application_quit(G_APPLICATION(app));
         return;
+    }
+
+    if (!backend_start(&backend, self_exe)) {
+        g_free(self_exe);
+        g_application_quit(G_APPLICATION(app));
+        return;
+    }
+    g_free(self_exe);
+
+    gchar *raw_data = backend_list(backend);
+    if (!raw_data) {
+        backend_stop(backend);
+        backend = NULL;
+        g_application_quit(G_APPLICATION(app));
+        return;
+    }
 
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(app));
     gtk_window_set_title(GTK_WINDOW(window), "Strait");
@@ -119,8 +147,6 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), app);
 
     gtk_window_present(GTK_WINDOW(window));
-
-    strait_processes_view_start_refresh(processes_view, 5);
     g_free(raw_data);
 }
 
