@@ -13,6 +13,35 @@
 
 static StraitBackend *backend = NULL;
 
+static void cmd_list(void) {
+    process_list *list = NULL;
+    if (get_network_processes(&list) != DISCOVERY_OK) {
+        printf("%s\n", BACKEND_RESPONSE_ERROR);
+        fflush(stdout);
+        return;
+    }
+
+    printf("%zu\n", list->count);
+    for (size_t i = 0; i < list->count; i++) {
+        uint64_t upload = 0;
+        uint64_t download = 0;
+        get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
+        printf(
+            "%d %d %d %d %lu %lu %s\n%s\n",
+            list->processes[i].pid,
+            list->processes[i].num_connections,
+            list->processes[i].has_tcp,
+            list->processes[i].has_udp,
+            (unsigned long)upload,
+            (unsigned long)download,
+            list->processes[i].process_name,
+            list->processes[i].exe_path
+        );
+    }
+    fflush(stdout);
+    destroy_process_list(list);
+}
+
 static int run_privileged(void) {
     ratelimit_init();
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -26,54 +55,12 @@ static int run_privileged(void) {
             line[len - 1] = '\0';
 
         if (strcmp(line, BACKEND_CMD_LIST) == 0) {
-            process_list *list = NULL;
-            if (get_network_processes(&list) != DISCOVERY_OK) {
-                printf("%s\n", BACKEND_RESPONSE_ERROR);
-                fflush(stdout);
-                continue;
-            }
-
-            printf("%zu\n", list->count);
-            for (size_t i = 0; i < list->count; i++) {
-                uint64_t upload = 0;
-                uint64_t download = 0;
-                get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
-                printf(
-                    "%d %d %d %d %lu %lu %s\n%s\n",
-                    list->processes[i].pid,
-                    list->processes[i].num_connections,
-                    list->processes[i].has_tcp,
-                    list->processes[i].has_udp,
-                    (unsigned long)upload,
-                    (unsigned long)download,
-                    list->processes[i].process_name,
-                    list->processes[i].exe_path
-                );
-            }
-            fflush(stdout);
-            destroy_process_list(list);
-        } else if (strncmp(line, BACKEND_CMD_SET_LIMIT, strlen(BACKEND_CMD_SET_LIMIT)) == 0) {
-            int pid;
-            uint64_t upload, download;
-            if (sscanf(
-                    line + strlen(BACKEND_CMD_SET_LIMIT) + 1, "%d %lu %lu", &pid, &upload, &download
-                ) == 3) {
-                rate_limit_config config = {
-                    .upload_kbps = (uint32_t)(upload / 1000),
-                    .download_kbps = (uint32_t)(download / 1000)
-                };
-                if (limit_process_bandwidth(pid, config) == RATELIMIT_OK) {
-                    printf("%s\n", BACKEND_RESPONSE_OK);
-                } else {
-                    printf("%s\n", BACKEND_RESPONSE_ERROR);
-                }
-            } else {
-                printf("%s\n", BACKEND_RESPONSE_ERROR);
-            }
-            fflush(stdout);
-        } else if (strcmp(line, BACKEND_CMD_QUIT) == 0) {
-            break;
+            cmd_list();
+            continue;
         }
+
+        if (strcmp(line, BACKEND_CMD_QUIT) == 0)
+            break;
     }
 
     return EXIT_SUCCESS;

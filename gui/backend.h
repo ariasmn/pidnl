@@ -4,10 +4,8 @@
 #include <glib.h>
 
 #define BACKEND_CMD_LIST "LIST"
-#define BACKEND_CMD_SET_LIMIT "SET_LIMIT"
 #define BACKEND_CMD_QUIT "QUIT"
 #define BACKEND_RESPONSE_READY "READY"
-#define BACKEND_RESPONSE_OK "OK"
 #define BACKEND_RESPONSE_ERROR "ERROR"
 
 typedef struct StraitBackend StraitBackend;
