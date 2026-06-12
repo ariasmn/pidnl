@@ -112,7 +112,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
 
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(app));
     gtk_window_set_title(GTK_WINDOW(window), "Strait");
-    gtk_window_set_default_size(GTK_WINDOW(window), 900, 600);
+    gtk_window_set_default_size(GTK_WINDOW(window), 1200, 600);
     gtk_widget_set_size_request(window, 700, 400);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new();

@@ -173,20 +173,23 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
-static void bind_limits_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *insc = gtk_list_item_get_child(item);
-
-    g_autofree gchar *t;
-    if (proc->upload_bps == 0 && proc->download_bps == 0) {
+    g_autofree gchar *t = g_strdup_printf("%lu", (unsigned long)((proc->upload_bps * 8) / 1000));
+    if (proc->upload_bps == 0)
         t = g_strdup("-");
-    } else {
-        guint64 upload_kbps = (proc->upload_bps * 8) / 1000;
-        guint64 download_kbps = (proc->download_bps * 8) / 1000;
-        t = g_strdup_printf("%lu / %lu", (unsigned long)upload_kbps, (unsigned long)download_kbps);
-    }
+    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+}
 
+static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *insc = gtk_list_item_get_child(item);
+    g_autofree gchar *t = g_strdup_printf("%lu", (unsigned long)((proc->download_bps * 8) / 1000));
+    if (proc->download_bps == 0)
+        t = g_strdup("-");
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
 }
 
@@ -308,7 +311,18 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Limits", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_limits_cb), 18)
+        make_column(
+            "Upload Limit (kbps)", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_upload_limit_cb), 10
+        )
+    );
+    gtk_column_view_append_column(
+        GTK_COLUMN_VIEW(column_view),
+        make_column(
+            "Download Limit (kbps)",
+            G_CALLBACK(setup_column_cb),
+            G_CALLBACK(bind_download_limit_cb),
+            10
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
