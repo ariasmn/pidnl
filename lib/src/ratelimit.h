@@ -42,6 +42,6 @@ const char *ratelimit_code_string(ratelimit_code code);
 
 ratelimit_code ratelimit_cleanup_all(void);
 
-int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download);
+int get_rate_limits_from_cgroup(pid_t pid, uint32_t *upload_kbps, uint32_t *download_kbps);
 
 #endif

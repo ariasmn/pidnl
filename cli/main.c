@@ -83,13 +83,16 @@ static int has_help_flag(int argc, char *argv[]) {
     return 0;
 }
 
-static void format_limit(char *buf, size_t size, uint64_t bps) {
-    uint64_t kbps = (bps * 8) / 1000;
-    snprintf(buf, size, bps == 0 ? "-" : "%lu", (unsigned long)kbps);
+static void format_limit(char *buf, size_t size, uint32_t kbps) {
+    if (kbps == RATELIMIT_UNLIMITED) {
+        snprintf(buf, size, "-");
+        return;
+    }
+    snprintf(buf, size, "%u", kbps);
 }
 
 static void
-print_process_list(process_list *list, uint64_t *upload_limits, uint64_t *download_limits) {
+print_process_list(process_list *list, uint32_t *upload_limits, uint32_t *download_limits) {
     printf(
         "%-8s %-20s %-10s %-10s %-12s %-12s %s\n",
         "PID",
@@ -147,8 +150,8 @@ static void cmd_list(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    uint64_t *upload_limits = calloc(list->count, sizeof(uint64_t));
-    uint64_t *download_limits = calloc(list->count, sizeof(uint64_t));
+    uint32_t *upload_limits = calloc(list->count, sizeof(uint32_t));
+    uint32_t *download_limits = calloc(list->count, sizeof(uint32_t));
     if (!upload_limits || !download_limits) {
         fprintf(stderr, "%s: failed to allocate memory\n", PROGRAM_NAME);
         destroy_process_list(list);

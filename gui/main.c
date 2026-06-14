@@ -23,12 +23,9 @@ static void handle_list_cmd(void) {
 
     printf("%zu\n", list->count);
     for (size_t i = 0; i < list->count; i++) {
-        uint64_t upload = 0;
-        uint64_t download = 0;
-        get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
-        uint32_t upload_kbps = upload == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(upload * 8 / 1000);
-        uint32_t download_kbps =
-            download == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(download * 8 / 1000);
+        uint32_t upload_kbps = RATELIMIT_UNLIMITED;
+        uint32_t download_kbps = RATELIMIT_UNLIMITED;
+        get_rate_limits_from_cgroup(list->processes[i].pid, &upload_kbps, &download_kbps);
         printf(
             "%d %d %d %d %u %u %s\n%s\n",
             list->processes[i].pid,

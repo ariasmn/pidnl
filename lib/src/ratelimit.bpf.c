@@ -22,12 +22,12 @@ struct {
     __type(value, struct rate_limit_state);
 } rate_state SEC(".maps");
 
-// Map to store rate limits in bytes per second (read from userspace)
+// Map to store rate limits in kbps (read from userspace)
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 2);
     __type(key, __u32);
-    __type(value, __u64);
+    __type(value, __u32);
 } rate_limits SEC(".maps");
 
 // Token bucket rate limiting
@@ -35,8 +35,9 @@ struct {
 // We need to revisit this since it's also not super reliable, but enough to
 // work on all the logic and later change the algorithm.
 // Returns: 1 = allow, 0 = drop
-static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __u32 packet_size) {
+static __always_inline int apply_rate_limit(__u32 direction, __u32 limit_kbps, __u32 packet_size) {
     struct rate_limit_state *state;
+    __u64 limit_bps = (__u64)limit_kbps * 1000 / 8;
     __u64 now = bpf_ktime_get_ns();
 
     state = bpf_map_lookup_elem(&rate_state, &direction);
@@ -78,7 +79,7 @@ static __always_inline int apply_rate_limit(__u32 direction, __u64 limit_bps, __
 SEC("cgroup/skb")
 int egress_rl(struct __sk_buff *skb) {
     __u32 key = DIRECTION_UPLOAD;
-    __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
+    __u32 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
         return 1;
     }
@@ -88,7 +89,7 @@ int egress_rl(struct __sk_buff *skb) {
 SEC("cgroup/skb")
 int ingress_rl(struct __sk_buff *skb) {
     __u32 key = DIRECTION_DOWNLOAD;
-    __u64 *limit = bpf_map_lookup_elem(&rate_limits, &key);
+    __u32 *limit = bpf_map_lookup_elem(&rate_limits, &key);
     if (!limit) {
         return 1;
     }
