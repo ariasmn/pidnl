@@ -534,7 +534,9 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Protocols", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_protocols_cb), 10, NULL)
+        make_column(
+            "Protocols", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_protocols_cb), 10, NULL
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
