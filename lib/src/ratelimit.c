@@ -91,7 +91,6 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
 static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
     struct ratelimit_bpf *skel;
     int map_fd, err;
-    __u64 upload_bps, download_bps;
     ratelimit_code ret;
     int upload_attached = 0;
 
@@ -108,8 +107,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     map_fd = bpf_map__fd(skel->maps.rate_limits);
 
     if (config.upload_kbps != RATELIMIT_UNLIMITED) {
-        upload_bps = (__u64)config.upload_kbps * 1000 / 8;
-        err = bpf_map_update_elem(map_fd, &DIRECTION_UPLOAD, &upload_bps, 0);
+        err = bpf_map_update_elem(map_fd, &DIRECTION_UPLOAD, &config.upload_kbps, 0);
         if (err) {
             ratelimit_bpf__destroy(skel);
             return RATELIMIT_BPF_LOAD;
@@ -126,8 +124,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
     }
 
     if (config.download_kbps != RATELIMIT_UNLIMITED) {
-        download_bps = (__u64)config.download_kbps * 1000 / 8;
-        err = bpf_map_update_elem(map_fd, &DIRECTION_DOWNLOAD, &download_bps, 0);
+        err = bpf_map_update_elem(map_fd, &DIRECTION_DOWNLOAD, &config.download_kbps, 0);
         if (err) {
             if (upload_attached) {
                 bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
@@ -335,9 +332,10 @@ ratelimit_code ratelimit_cleanup_all(void) {
     return RATELIMIT_OK;
 }
 
-static int
-read_limit_from_cgroup_progs(int cgroup_fd, enum bpf_attach_type attach_type, uint64_t *limit) {
-    *limit = 0;
+static int read_limit_from_cgroup_progs(
+    int cgroup_fd, enum bpf_attach_type attach_type, uint32_t *limit_kbps
+) {
+    *limit_kbps = 0;
 
     // We only attach one program per attach type (detach + no ALLOW_MULTI).
     __u32 prog_id = 0;
@@ -382,9 +380,9 @@ read_limit_from_cgroup_progs(int cgroup_fd, enum bpf_attach_type attach_type, ui
             strncmp(map_info.name, RATE_LIMITS_MAP_NAME, BPF_OBJ_NAME_LEN) == 0) {
             __u32 key =
                 (attach_type == BPF_CGROUP_INET_EGRESS) ? DIRECTION_UPLOAD : DIRECTION_DOWNLOAD;
-            __u64 value;
+            __u32 value;
             if (bpf_map_lookup_elem(map_fd, &key, &value) == 0) {
-                *limit = value;
+                *limit_kbps = value;
                 close(map_fd);
                 close(prog_fd);
                 return 0;
@@ -397,9 +395,9 @@ read_limit_from_cgroup_progs(int cgroup_fd, enum bpf_attach_type attach_type, ui
     return -1;
 }
 
-int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download) {
-    *upload = 0;
-    *download = 0;
+int get_rate_limits_from_cgroup(pid_t pid, uint32_t *upload_kbps, uint32_t *download_kbps) {
+    *upload_kbps = RATELIMIT_UNLIMITED;
+    *download_kbps = RATELIMIT_UNLIMITED;
 
     if (pid <= 0) {
         return -1;
@@ -413,11 +411,15 @@ int get_rate_limits_from_cgroup(pid_t pid, uint64_t *upload, uint64_t *download)
         return -1;
     }
 
-    // Query egress programs for upload limit
-    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_EGRESS, upload);
-
-    // Query ingress programs for download limit
-    read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_INGRESS, download);
+    // A successful read means a limit is set for that direction (possibly 0);
+    // otherwise leave the UNLIMITED sentinel.
+    uint32_t kbps;
+    if (read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_EGRESS, &kbps) == 0) {
+        *upload_kbps = kbps;
+    }
+    if (read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_INGRESS, &kbps) == 0) {
+        *download_kbps = kbps;
+    }
 
     close(cgroup_fd);
     return 0;
