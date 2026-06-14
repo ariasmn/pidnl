@@ -411,8 +411,6 @@ int get_rate_limits_from_cgroup(pid_t pid, uint32_t *upload_kbps, uint32_t *down
         return -1;
     }
 
-    // A successful read means a limit is set for that direction (possibly 0);
-    // otherwise leave the UNLIMITED sentinel.
     uint32_t kbps;
     if (read_limit_from_cgroup_progs(cgroup_fd, BPF_CGROUP_INET_EGRESS, &kbps) == 0) {
         *upload_kbps = kbps;
