@@ -16,7 +16,7 @@ static StraitBackend *backend = NULL;
 static void handle_list_cmd(void) {
     process_list *list = NULL;
     if (get_network_processes(&list) != DISCOVERY_OK) {
-        printf("%s\n", BACKEND_RESPONSE_ERROR);
+        printf("%d\n", BACKEND_RESPONSE_ERROR);
         fflush(stdout);
         return;
     }
@@ -26,14 +26,17 @@ static void handle_list_cmd(void) {
         uint64_t upload = 0;
         uint64_t download = 0;
         get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
+        uint32_t upload_kbps = upload == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(upload * 8 / 1000);
+        uint32_t download_kbps =
+            download == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(download * 8 / 1000);
         printf(
-            "%d %d %d %d %lu %lu %s\n%s\n",
+            "%d %d %d %d %u %u %s\n%s\n",
             list->processes[i].pid,
             list->processes[i].num_connections,
             list->processes[i].has_tcp,
             list->processes[i].has_udp,
-            (unsigned long)upload,
-            (unsigned long)download,
+            upload_kbps,
+            download_kbps,
             list->processes[i].process_name,
             list->processes[i].exe_path
         );
@@ -42,53 +45,57 @@ static void handle_list_cmd(void) {
     destroy_process_list(list);
 }
 
-static void handle_limit_cmd(const char *line) {
-    gint pid;
-    guint upload, download;
-    if (sscanf(line, BACKEND_CMD_LIMIT " %d %u %u", &pid, &upload, &download) != 3) {
-        printf("%s\n", BACKEND_RESPONSE_ERROR);
-        fflush(stdout);
-        return;
-    }
-
+static void handle_limit_cmd(pid_t pid, uint32_t upload, uint32_t download) {
     ratelimit_code rc;
     if (upload == RATELIMIT_UNLIMITED && download == RATELIMIT_UNLIMITED) {
         // TODO: Check if it makes sense to clean using the monitor itself, instead of doing this.
-        rc = unregister_rate_limiter_by_pid((pid_t)pid);
+        rc = unregister_rate_limiter_by_pid(pid);
         if (rc == RATELIMIT_CGROUP_NOT_FOUND)
             rc = RATELIMIT_OK;
     } else {
         rate_limit_config cfg = {.upload_kbps = upload, .download_kbps = download};
-        rc = limit_process_bandwidth((pid_t)pid, cfg);
+        rc = limit_process_bandwidth(pid, cfg);
     }
 
-    printf("%s\n", rc == RATELIMIT_OK ? BACKEND_RESPONSE_OK : BACKEND_RESPONSE_ERROR);
+    printf("%d\n", rc == RATELIMIT_OK ? BACKEND_RESPONSE_OK : BACKEND_RESPONSE_ERROR);
     fflush(stdout);
 }
 
 static int run_privileged(void) {
-    ratelimit_init();
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    printf("%s\n", BACKEND_RESPONSE_READY);
+    ratelimit_code rc = ratelimit_init();
+    if (rc != RATELIMIT_OK) {
+        fprintf(stderr, "strait: ratelimit_init failed: %s\n", ratelimit_code_string(rc));
+        printf("%d\n", BACKEND_RESPONSE_ERROR);
+        return EXIT_FAILURE;
+    }
+
+    printf("%d\n", BACKEND_RESPONSE_READY);
 
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n')
-            line[len - 1] = '\0';
+        int cmd;
+        if (sscanf(line, "%d", &cmd) != 1)
+            continue;
 
-        if (strcmp(line, BACKEND_CMD_LIST) == 0) {
+        if (cmd == BACKEND_CMD_LIST) {
             handle_list_cmd();
             continue;
         }
 
-        if (strncmp(line, BACKEND_CMD_LIMIT, strlen(BACKEND_CMD_LIMIT)) == 0) {
-            handle_limit_cmd(line);
+        if (cmd == BACKEND_CMD_LIMIT) {
+            gint pid;
+            uint32_t upload, download;
+            if (sscanf(line, "%d %d %u %u", &cmd, &pid, &upload, &download) == 4)
+                handle_limit_cmd(pid, upload, download);
+            else
+                printf("%d\n", BACKEND_RESPONSE_ERROR);
+            fflush(stdout);
             continue;
         }
 
-        if (strcmp(line, BACKEND_CMD_QUIT) == 0)
+        if (cmd == BACKEND_CMD_QUIT)
             break;
     }
 

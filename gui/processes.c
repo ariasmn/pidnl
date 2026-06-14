@@ -53,13 +53,13 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
 struct _StraitProcess {
     GObject parent_instance;
     gchar *name;
-    gint pid;
+    pid_t pid;
     gint connections;
     gchar *protocols;
     gchar *exe_path;
     GIcon *icon;
-    guint64 upload_bps;
-    guint64 download_bps;
+    guint32 upload_kbps;
+    guint32 download_kbps;
 };
 
 G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
@@ -81,13 +81,13 @@ static void strait_process_init(StraitProcess *self) { (void)self; }
 
 static StraitProcess *strait_process_new(
     const gchar *name,
-    gint pid,
+    pid_t pid,
     gint connections,
     const gchar *protocols,
     const gchar *exe_path,
     GIcon *icon,
-    guint64 upload_bps,
-    guint64 download_bps
+    guint32 upload_kbps,
+    guint32 download_kbps
 ) {
     StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
@@ -96,8 +96,8 @@ static StraitProcess *strait_process_new(
     p->protocols = g_strdup(protocols);
     p->exe_path = g_strdup(exe_path);
     p->icon = icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
-    p->upload_bps = upload_bps;
-    p->download_bps = download_bps;
+    p->upload_kbps = upload_kbps;
+    p->download_kbps = download_kbps;
     return p;
 }
 
@@ -120,25 +120,20 @@ static StraitProcess *find_process_by_pid(GListStore *store, pid_t pid) {
     return NULL;
 }
 
-static guint kbps_from_bps(guint64 bps) {
-    if (bps == 0) {
-        return RATELIMIT_UNLIMITED;
-    }
-    return (guint)((bps * 8) / 1000);
-}
-
-static guint64 bps_from_kbps(guint kbps) {
-    if (kbps == RATELIMIT_UNLIMITED) {
-        return 0;
-    }
-    return (guint64)kbps * 1000 / 8;
-}
-
-static guint parse_limit_value(const gchar *text) {
+static gboolean parse_limit_value(const gchar *text, guint *out) {
     if (g_strcmp0(text, "") == 0 || g_strcmp0(text, "-") == 0) {
-        return RATELIMIT_UNLIMITED;
+        *out = RATELIMIT_UNLIMITED;
+        return TRUE;
     }
-    return (guint)g_ascii_strtoull(text, NULL, 10);
+
+    gchar *endptr = NULL;
+    guint64 value = g_ascii_strtoull(text, &endptr, 10);
+    if (endptr == text || *endptr != '\0' || value > G_MAXUINT32) {
+        return FALSE;
+    }
+
+    *out = (guint)value;
+    return TRUE;
 }
 
 static void apply_limit(GtkEditable *editable) {
@@ -160,10 +155,14 @@ static void apply_limit(GtkEditable *editable) {
     g_autofree gchar *trimmed = g_strdup(gtk_editable_get_text(editable));
     g_strstrip(trimmed);
 
-    guint new_value = parse_limit_value(trimmed);
+    guint new_value = 0;
+    if (!parse_limit_value(trimmed, &new_value)) {
+        return;
+    }
+
     g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
-    guint upload = proc ? kbps_from_bps(proc->upload_bps) : RATELIMIT_UNLIMITED;
-    guint download = proc ? kbps_from_bps(proc->download_bps) : RATELIMIT_UNLIMITED;
+    guint upload = proc ? proc->upload_kbps : RATELIMIT_UNLIMITED;
+    guint download = proc ? proc->download_kbps : RATELIMIT_UNLIMITED;
 
     if (direction == DIRECTION_UPLOAD) {
         upload = new_value;
@@ -180,9 +179,9 @@ static void apply_limit(GtkEditable *editable) {
     }
 
     if (direction == DIRECTION_UPLOAD) {
-        proc->upload_bps = bps_from_kbps(upload);
+        proc->upload_kbps = upload;
     } else {
-        proc->download_bps = bps_from_kbps(download);
+        proc->download_kbps = download;
     }
 }
 
@@ -294,7 +293,7 @@ setup_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpoi
     (void)factory;
     (void)user_data;
     GtkWidget *entry = create_limit_entry();
-    g_object_set_data(G_OBJECT(entry), "direction", GINT_TO_POINTER(DIRECTION_UPLOAD));
+    g_object_set_data(G_OBJECT(entry), "direction", GUINT_TO_POINTER(DIRECTION_UPLOAD));
     gtk_list_item_set_child(item, entry);
 }
 
@@ -303,7 +302,7 @@ setup_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gp
     (void)factory;
     (void)user_data;
     GtkWidget *entry = create_limit_entry();
-    g_object_set_data(G_OBJECT(entry), "direction", GINT_TO_POINTER(DIRECTION_DOWNLOAD));
+    g_object_set_data(G_OBJECT(entry), "direction", GUINT_TO_POINTER(DIRECTION_DOWNLOAD));
     gtk_list_item_set_child(item, entry);
 }
 
@@ -353,8 +352,8 @@ static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem 
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
     g_autofree gchar *t = NULL;
-    if (proc->upload_bps != 0)
-        t = g_strdup_printf("%lu", (unsigned long)((proc->upload_bps * 8) / 1000));
+    if (proc->upload_kbps != RATELIMIT_UNLIMITED)
+        t = g_strdup_printf("%u", proc->upload_kbps);
     gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
 }
 
@@ -364,8 +363,8 @@ static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListIte
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
     g_autofree gchar *t = NULL;
-    if (proc->download_bps != 0)
-        t = g_strdup_printf("%lu", (unsigned long)((proc->download_bps * 8) / 1000));
+    if (proc->download_kbps != RATELIMIT_UNLIMITED)
+        t = g_strdup_printf("%u", proc->download_kbps);
     gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
 }
 
@@ -388,8 +387,8 @@ static void append_process_to_store(
     int has_tcp,
     int has_udp,
     const char *exe_path,
-    guint64 upload_bps,
-    guint64 download_bps
+    guint32 upload_kbps,
+    guint32 download_kbps
 ) {
     const char *protocols;
     if (has_tcp && has_udp)
@@ -403,7 +402,7 @@ static void append_process_to_store(
 
     g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
     g_autoptr(StraitProcess) proc = strait_process_new(
-        name, (gint)pid, connections, protocols, exe_path, icon, upload_bps, download_bps
+        name, pid, connections, protocols, exe_path, icon, upload_kbps, download_kbps
     );
     g_list_store_append(store, G_OBJECT(proc));
 }
@@ -419,8 +418,9 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
         return;
     }
 
-    int count = atoi(lines[0]);
-    if (count <= 0) {
+    gchar *endptr = NULL;
+    gint64 count = g_ascii_strtoll(lines[0], &endptr, 10);
+    if (endptr == lines[0] || *endptr != '\0' || count <= 0 || count > G_MAXINT) {
         g_strfreev(lines);
         return;
     }
@@ -428,11 +428,11 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
     int idx = 1;
     for (int i = 0; i < count && lines[idx] && lines[idx + 1]; i++) {
         int pid, connections, has_tcp, has_udp;
-        unsigned long upload, download;
+        unsigned int upload, download;
         char name[256] = {0};
         if (sscanf(
                 lines[idx],
-                "%d %d %d %d %lu %lu %255[^\n]",
+                "%d %d %d %d %u %u %255[^\n]",
                 &pid,
                 &connections,
                 &has_tcp,
@@ -444,7 +444,7 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
             append_process_to_store(
                 store,
                 name,
-                (pid_t)pid,
+                pid,
                 connections,
                 has_tcp,
                 has_udp,
