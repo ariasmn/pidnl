@@ -138,7 +138,8 @@ backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint3
     if (!backend || !backend->stdin_channel || !backend->stdout_channel)
         return FALSE;
 
-    gchar *cmd = g_strdup_printf("%d %d %u %u\n", BACKEND_CMD_LIMIT, pid, upload_kbps, download_kbps);
+    gchar *cmd =
+        g_strdup_printf("%d %d %u %u\n", BACKEND_CMD_LIMIT, pid, upload_kbps, download_kbps);
     g_io_channel_write_chars(backend->stdin_channel, cmd, -1, NULL, NULL);
     g_io_channel_flush(backend->stdin_channel, NULL);
     g_free(cmd);

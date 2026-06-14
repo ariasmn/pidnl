@@ -456,15 +456,7 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
                 name
             ) == 7) {
             append_process_to_store(
-                store,
-                name,
-                pid,
-                connections,
-                has_tcp,
-                has_udp,
-                lines[idx + 1],
-                upload,
-                download
+                store, name, pid, connections, has_tcp, has_udp, lines[idx + 1], upload, download
             );
         }
         idx += 2;
