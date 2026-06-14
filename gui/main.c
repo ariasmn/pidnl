@@ -58,6 +58,12 @@ static void handle_limit_cmd(pid_t pid, uint32_t upload, uint32_t download) {
     fflush(stdout);
 }
 
+static void handle_clean_cmd(void) {
+    ratelimit_code rc = ratelimit_cleanup_all();
+    printf("%d\n", rc == RATELIMIT_OK ? BACKEND_RESPONSE_OK : BACKEND_RESPONSE_ERROR);
+    fflush(stdout);
+}
+
 static int run_privileged(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -92,6 +98,11 @@ static int run_privileged(void) {
             continue;
         }
 
+        if (cmd == BACKEND_CMD_CLEAN) {
+            handle_clean_cmd();
+            continue;
+        }
+
         if (cmd == BACKEND_CMD_QUIT)
             break;
     }
@@ -108,6 +119,36 @@ static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
         strait_processes_view_refresh(view, raw_data);
         g_free(raw_data);
     }
+}
+
+static void on_clean_response(AdwAlertDialog *dialog, const char *response, gpointer user_data) {
+    (void)dialog;
+    if (g_strcmp0(response, "clean") != 0)
+        return;
+
+    GtkWidget *view = GTK_WIDGET(user_data);
+    if (!backend_clean(backend))
+        return;
+
+    gchar *raw_data = backend_list(backend);
+    if (raw_data) {
+        strait_processes_view_refresh(view, raw_data);
+        g_free(raw_data);
+    }
+}
+
+static void on_clean_clicked(GtkButton *button, gpointer user_data) {
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        "Clean up all rate limits?", "This will remove all rate limits created by Strait."
+    ));
+
+    adw_alert_dialog_add_responses(dialog, "cancel", "Cancel", "clean", "Clean", NULL);
+    adw_alert_dialog_set_response_appearance(dialog, "clean", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response(dialog, "cancel");
+    adw_alert_dialog_set_close_response(dialog, "cancel");
+
+    g_signal_connect(dialog, "response", G_CALLBACK(on_clean_response), user_data);
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(button))));
 }
 
 static gboolean on_close_request(GtkWindow *window, gpointer user_data) {
@@ -163,6 +204,11 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), processes_view);
     adw_header_bar_pack_end(header_bar, refresh_button);
 
+    GtkWidget *clean_button = gtk_button_new_from_icon_name("user-trash-symbolic");
+    gtk_widget_set_tooltip_text(clean_button, "Clean up all rate limits");
+    g_signal_connect(clean_button, "clicked", G_CALLBACK(on_clean_clicked), processes_view);
+    adw_header_bar_pack_end(header_bar, clean_button);
+
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), processes_view);
 
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), app);
@@ -176,7 +222,8 @@ int main(int argc, char **argv) {
         return run_privileged();
     }
 
-    AdwApplication *app = adw_application_new("com.example.strait", G_APPLICATION_DEFAULT_FLAGS);
+    AdwApplication *app =
+        adw_application_new("io.github.ariasmn.Strait", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);

@@ -154,3 +154,23 @@ backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint3
     g_free(line);
     return code == BACKEND_RESPONSE_OK;
 }
+
+gboolean backend_clean(StraitBackend *backend) {
+    if (!backend || !backend->stdin_channel || !backend->stdout_channel)
+        return FALSE;
+
+    gchar *cmd = g_strdup_printf("%d\n", BACKEND_CMD_CLEAN);
+    g_io_channel_write_chars(backend->stdin_channel, cmd, -1, NULL, NULL);
+    g_io_channel_flush(backend->stdin_channel, NULL);
+    g_free(cmd);
+
+    gchar *line = NULL;
+    gsize len = 0;
+    if (g_io_channel_read_line(backend->stdout_channel, &line, &len, NULL, NULL) !=
+        G_IO_STATUS_NORMAL)
+        return FALSE;
+
+    gint code = parse_protocol_int(line);
+    g_free(line);
+    return code == BACKEND_RESPONSE_OK;
+}
