@@ -382,14 +382,40 @@ static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListIte
     set_entry_to_value(GTK_EDITABLE(entry), proc->download_kbps);
 }
 
-static GtkColumnViewColumn *
-make_column(const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_chars) {
+static gint compare_name(gconstpointer a, gconstpointer b, gpointer user_data) {
+    (void)user_data;
+    const StraitProcess *pa = a;
+    const StraitProcess *pb = b;
+    return g_utf8_collate(pa->name ? pa->name : "", pb->name ? pb->name : "");
+}
+
+static gint compare_pid(gconstpointer a, gconstpointer b, gpointer user_data) {
+    (void)user_data;
+    const StraitProcess *pa = a;
+    const StraitProcess *pb = b;
+    return (pa->pid > pb->pid) - (pa->pid < pb->pid);
+}
+
+static gint compare_connections(gconstpointer a, gconstpointer b, gpointer user_data) {
+    (void)user_data;
+    const StraitProcess *pa = a;
+    const StraitProcess *pb = b;
+    return (pa->connections > pb->connections) - (pa->connections < pb->connections);
+}
+
+static GtkColumnViewColumn *make_column(
+    const gchar *title, GCallback setup_cb, GCallback bind_cb, gint min_chars, GtkSorter *sorter
+) {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
     g_signal_connect(factory, "setup", setup_cb, GINT_TO_POINTER(min_chars));
     g_signal_connect(factory, "bind", bind_cb, NULL);
 
     GtkColumnViewColumn *col = gtk_column_view_column_new(title, factory);
     gtk_column_view_column_set_resizable(col, TRUE);
+    if (sorter) {
+        gtk_column_view_column_set_sorter(col, sorter);
+        g_object_unref(sorter);
+    }
     return col;
 }
 
@@ -472,24 +498,43 @@ void strait_processes_view_set_backend(GtkWidget *view, StraitBackend *backend) 
 GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
 
-    g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(store));
+    GtkSortListModel *sort_model = gtk_sort_list_model_new(G_LIST_MODEL(store), NULL);
+    g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(sort_model));
     GtkWidget *column_view = gtk_column_view_new(GTK_SELECTION_MODEL(selection));
 
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Name", G_CALLBACK(setup_name_cb), G_CALLBACK(bind_name_cb), 0)
+        make_column(
+            "Name",
+            G_CALLBACK(setup_name_cb),
+            G_CALLBACK(bind_name_cb),
+            0,
+            GTK_SORTER(gtk_custom_sorter_new(compare_name, NULL, NULL))
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("PID", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_pid_cb), 10)
+        make_column(
+            "PID",
+            G_CALLBACK(setup_column_cb),
+            G_CALLBACK(bind_pid_cb),
+            10,
+            GTK_SORTER(gtk_custom_sorter_new(compare_pid, NULL, NULL))
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Connections", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_connections_cb), 12)
+        make_column(
+            "Connections",
+            G_CALLBACK(setup_column_cb),
+            G_CALLBACK(bind_connections_cb),
+            12,
+            GTK_SORTER(gtk_custom_sorter_new(compare_connections, NULL, NULL))
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Protocols", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_protocols_cb), 10)
+        make_column("Protocols", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_protocols_cb), 10, NULL)
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
@@ -497,7 +542,8 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
             "Upload Limit (kbps)",
             G_CALLBACK(setup_upload_limit_cb),
             G_CALLBACK(bind_upload_limit_cb),
-            10
+            10,
+            NULL
         )
     );
     gtk_column_view_append_column(
@@ -506,12 +552,19 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
             "Download Limit (kbps)",
             G_CALLBACK(setup_download_limit_cb),
             G_CALLBACK(bind_download_limit_cb),
-            10
+            10,
+            NULL
         )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
+        make_column(
+            "Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30, NULL
+        )
+    );
+
+    gtk_sort_list_model_set_sorter(
+        sort_model, gtk_column_view_get_sorter(GTK_COLUMN_VIEW(column_view))
     );
 
     GtkGesture *click = gtk_gesture_click_new();
