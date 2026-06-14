@@ -121,19 +121,36 @@ static StraitProcess *find_process_by_pid(GListStore *store, pid_t pid) {
 }
 
 static gboolean parse_limit_value(const gchar *text, guint *out) {
-    if (g_strcmp0(text, "") == 0 || g_strcmp0(text, "-") == 0) {
+    // Empty, "-", or "-1" all mean unlimited; no other negative is valid.
+    if (g_strcmp0(text, "") == 0 || g_strcmp0(text, "-") == 0 || g_strcmp0(text, "-1") == 0) {
         *out = RATELIMIT_UNLIMITED;
         return TRUE;
     }
 
     gchar *endptr = NULL;
-    guint64 value = g_ascii_strtoull(text, &endptr, 10);
-    if (endptr == text || *endptr != '\0' || value > G_MAXUINT32) {
+    gint64 value = g_ascii_strtoll(text, &endptr, 10);
+    if (endptr == text || *endptr != '\0' || value < 0) {
         return FALSE;
+    }
+
+    // RATELIMIT_UNLIMITED is the reserved sentinel, so a real limit caps one
+    // below it; anything larger (including overflowing input) clamps to that max.
+    if (value >= RATELIMIT_UNLIMITED) {
+        value = RATELIMIT_UNLIMITED - 1;
     }
 
     *out = (guint)value;
     return TRUE;
+}
+
+// Render a limit into its entry: empty for unlimited, the number otherwise.
+static void set_entry_to_value(GtkEditable *editable, guint value) {
+    if (value == RATELIMIT_UNLIMITED) {
+        gtk_editable_set_text(editable, "");
+        return;
+    }
+    g_autofree gchar *t = g_strdup_printf("%u", value);
+    gtk_editable_set_text(editable, t);
 }
 
 static void apply_limit(GtkEditable *editable) {
@@ -152,17 +169,19 @@ static void apply_limit(GtkEditable *editable) {
         return;
     }
 
+    g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
+    guint upload = proc ? proc->upload_kbps : RATELIMIT_UNLIMITED;
+    guint download = proc ? proc->download_kbps : RATELIMIT_UNLIMITED;
+    guint current = direction == DIRECTION_UPLOAD ? upload : download;
+
     g_autofree gchar *trimmed = g_strdup(gtk_editable_get_text(editable));
     g_strstrip(trimmed);
 
     guint new_value = 0;
     if (!parse_limit_value(trimmed, &new_value)) {
+        set_entry_to_value(editable, current);
         return;
     }
-
-    g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
-    guint upload = proc ? proc->upload_kbps : RATELIMIT_UNLIMITED;
-    guint download = proc ? proc->download_kbps : RATELIMIT_UNLIMITED;
 
     if (direction == DIRECTION_UPLOAD) {
         upload = new_value;
@@ -171,18 +190,19 @@ static void apply_limit(GtkEditable *editable) {
     }
 
     if (!backend_set_limit(backend, pid, upload, download)) {
+        set_entry_to_value(editable, current);
         return;
     }
 
-    if (!proc) {
-        return;
+    if (proc) {
+        if (direction == DIRECTION_UPLOAD) {
+            proc->upload_kbps = upload;
+        } else {
+            proc->download_kbps = download;
+        }
     }
 
-    if (direction == DIRECTION_UPLOAD) {
-        proc->upload_kbps = upload;
-    } else {
-        proc->download_kbps = download;
-    }
+    set_entry_to_value(editable, new_value);
 }
 
 static void on_limit_entry_activate(GtkEntry *entry) { apply_limit(GTK_EDITABLE(entry)); }
@@ -351,10 +371,7 @@ static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem 
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
-    g_autofree gchar *t = NULL;
-    if (proc->upload_kbps != RATELIMIT_UNLIMITED)
-        t = g_strdup_printf("%u", proc->upload_kbps);
-    gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
+    set_entry_to_value(GTK_EDITABLE(entry), proc->upload_kbps);
 }
 
 static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
@@ -362,10 +379,7 @@ static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListIte
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
-    g_autofree gchar *t = NULL;
-    if (proc->download_kbps != RATELIMIT_UNLIMITED)
-        t = g_strdup_printf("%u", proc->download_kbps);
-    gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
+    set_entry_to_value(GTK_EDITABLE(entry), proc->download_kbps);
 }
 
 static GtkColumnViewColumn *
