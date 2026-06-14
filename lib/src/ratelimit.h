@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define RATELIMIT_UNLIMITED UINT32_MAX
+extern const uint32_t RATELIMIT_UNLIMITED;
+extern const unsigned int DIRECTION_UPLOAD;
+extern const unsigned int DIRECTION_DOWNLOAD;
 
 typedef enum {
     RATELIMIT_OK = 0,

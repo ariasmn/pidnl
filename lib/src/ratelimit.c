@@ -20,8 +20,9 @@ static const char PROC_MOUNTS[] = "/proc/mounts";
 static const char CGROUP2_FS[] = "cgroup2";
 static const char CGROUP_WALK_CONTROLLER[] = "cpu";
 
-static const unsigned int DIRECTION_UPLOAD = 0;
-static const unsigned int DIRECTION_DOWNLOAD = 1;
+const uint32_t RATELIMIT_UNLIMITED = UINT32_MAX;
+const unsigned int DIRECTION_UPLOAD = 0;
+const unsigned int DIRECTION_DOWNLOAD = 1;
 
 static const char *EGRESS_PROG_NAME = "egress_rl";
 static const char *INGRESS_PROG_NAME = "ingress_rl";

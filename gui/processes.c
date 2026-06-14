@@ -1,4 +1,5 @@
 #include "processes.h"
+#include "ratelimit.h"
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
 
@@ -52,13 +53,13 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
 struct _StraitProcess {
     GObject parent_instance;
     gchar *name;
-    gint pid;
+    pid_t pid;
     gint connections;
     gchar *protocols;
     gchar *exe_path;
     GIcon *icon;
-    guint64 upload_bps;
-    guint64 download_bps;
+    guint32 upload_kbps;
+    guint32 download_kbps;
 };
 
 G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
@@ -80,13 +81,13 @@ static void strait_process_init(StraitProcess *self) { (void)self; }
 
 static StraitProcess *strait_process_new(
     const gchar *name,
-    gint pid,
+    pid_t pid,
     gint connections,
     const gchar *protocols,
     const gchar *exe_path,
     GIcon *icon,
-    guint64 upload_bps,
-    guint64 download_bps
+    guint32 upload_kbps,
+    guint32 download_kbps
 ) {
     StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
@@ -95,9 +96,183 @@ static StraitProcess *strait_process_new(
     p->protocols = g_strdup(protocols);
     p->exe_path = g_strdup(exe_path);
     p->icon = icon ? g_object_ref(icon) : g_themed_icon_new("application-x-executable");
-    p->upload_bps = upload_bps;
-    p->download_bps = download_bps;
+    p->upload_kbps = upload_kbps;
+    p->download_kbps = download_kbps;
     return p;
+}
+
+static GListStore *get_store_from_view(GtkWidget *view) {
+    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
+}
+
+static StraitBackend *get_backend_from_view(GtkWidget *view) {
+    return g_object_get_data(G_OBJECT(view), "backend");
+}
+
+static StraitProcess *find_process_by_pid(GListStore *store, pid_t pid) {
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
+    for (guint i = 0; i < n; i++) {
+        g_autoptr(StraitProcess) proc =
+            STRAIT_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
+        if (proc->pid == pid)
+            return g_object_ref(proc);
+    }
+    return NULL;
+}
+
+static gboolean parse_limit_value(const gchar *text, guint *out) {
+    // Empty, "-", or "-1" all mean unlimited; no other negative is valid.
+    if (g_strcmp0(text, "") == 0 || g_strcmp0(text, "-") == 0 || g_strcmp0(text, "-1") == 0) {
+        *out = RATELIMIT_UNLIMITED;
+        return TRUE;
+    }
+
+    gchar *endptr = NULL;
+    gint64 value = g_ascii_strtoll(text, &endptr, 10);
+    if (endptr == text || *endptr != '\0' || value < 0) {
+        return FALSE;
+    }
+
+    // RATELIMIT_UNLIMITED is the reserved sentinel, so a real limit caps one
+    // below it; anything larger (including overflowing input) clamps to that max.
+    if (value >= RATELIMIT_UNLIMITED) {
+        value = RATELIMIT_UNLIMITED - 1;
+    }
+
+    *out = (guint)value;
+    return TRUE;
+}
+
+// Render a limit into its entry: empty for unlimited, the number otherwise.
+static void set_entry_to_value(GtkEditable *editable, guint value) {
+    if (value == RATELIMIT_UNLIMITED) {
+        gtk_editable_set_text(editable, "");
+        return;
+    }
+    g_autofree gchar *t = g_strdup_printf("%u", value);
+    gtk_editable_set_text(editable, t);
+}
+
+static void apply_limit(GtkEditable *editable) {
+    GtkWidget *entry = GTK_WIDGET(editable);
+    pid_t pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(entry), "pid"));
+    guint direction = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(entry), "direction"));
+    GtkWidget *view = gtk_widget_get_ancestor(entry, GTK_TYPE_SCROLLED_WINDOW);
+
+    if (!view || pid <= 0) {
+        return;
+    }
+
+    StraitBackend *backend = get_backend_from_view(view);
+    GListStore *store = get_store_from_view(view);
+    if (!backend || !store) {
+        return;
+    }
+
+    g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
+    guint upload = proc ? proc->upload_kbps : RATELIMIT_UNLIMITED;
+    guint download = proc ? proc->download_kbps : RATELIMIT_UNLIMITED;
+    guint current = direction == DIRECTION_UPLOAD ? upload : download;
+
+    g_autofree gchar *trimmed = g_strdup(gtk_editable_get_text(editable));
+    g_strstrip(trimmed);
+
+    guint new_value = 0;
+    if (!parse_limit_value(trimmed, &new_value)) {
+        set_entry_to_value(editable, current);
+        return;
+    }
+
+    if (direction == DIRECTION_UPLOAD) {
+        upload = new_value;
+    } else {
+        download = new_value;
+    }
+
+    if (!backend_set_limit(backend, pid, upload, download)) {
+        set_entry_to_value(editable, current);
+        return;
+    }
+
+    if (proc) {
+        if (direction == DIRECTION_UPLOAD) {
+            proc->upload_kbps = upload;
+        } else {
+            proc->download_kbps = download;
+        }
+    }
+
+    set_entry_to_value(editable, new_value);
+}
+
+static void on_limit_entry_activate(GtkEntry *entry) { apply_limit(GTK_EDITABLE(entry)); }
+
+static void on_limit_focus_leave(GtkEventControllerFocus *controller, gpointer user_data) {
+    (void)controller;
+    apply_limit(GTK_EDITABLE(user_data));
+}
+
+static void clear_focus_from_entry(GtkWidget *entry) {
+    GtkRoot *root = gtk_widget_get_root(entry);
+    if (root) {
+        gtk_root_set_focus(root, NULL);
+    }
+}
+
+static gboolean on_limit_entry_key_pressed(
+    GtkEventControllerKey *controller,
+    guint keyval,
+    guint keycode,
+    GdkModifierType state,
+    gpointer user_data
+) {
+    (void)controller;
+    (void)keycode;
+    (void)state;
+
+    if (keyval != GDK_KEY_Escape) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    clear_focus_from_entry(GTK_WIDGET(user_data));
+    return GDK_EVENT_STOP;
+}
+
+static void on_column_view_pressed(
+    GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data
+) {
+    (void)gesture;
+    (void)n_press;
+
+    GtkWidget *column_view = GTK_WIDGET(user_data);
+    GtkWidget *target = gtk_widget_pick(column_view, x, y, GTK_PICK_DEFAULT);
+
+    if (target && gtk_widget_get_ancestor(target, GTK_TYPE_ENTRY)) {
+        return;
+    }
+
+    GtkRoot *root = gtk_widget_get_root(column_view);
+    if (root) {
+        gtk_root_set_focus(root, NULL);
+    }
+}
+
+static GtkWidget *create_limit_entry(void) {
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_input_purpose(GTK_ENTRY(entry), GTK_INPUT_PURPOSE_NUMBER);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Unlimited");
+    gtk_entry_set_alignment(GTK_ENTRY(entry), 1.0f);
+
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    gtk_widget_add_controller(entry, focus);
+    g_signal_connect(focus, "leave", G_CALLBACK(on_limit_focus_leave), entry);
+    g_signal_connect(entry, "activate", G_CALLBACK(on_limit_entry_activate), NULL);
+
+    GtkEventController *key = gtk_event_controller_key_new();
+    gtk_widget_add_controller(entry, key);
+    g_signal_connect(key, "key-pressed", G_CALLBACK(on_limit_entry_key_pressed), entry);
+
+    return entry;
 }
 
 static void
@@ -131,6 +306,24 @@ setup_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer use
     gtk_box_append(GTK_BOX(box), insc);
 
     gtk_list_item_set_child(item, box);
+}
+
+static void
+setup_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    (void)user_data;
+    GtkWidget *entry = create_limit_entry();
+    g_object_set_data(G_OBJECT(entry), "direction", GUINT_TO_POINTER(DIRECTION_UPLOAD));
+    gtk_list_item_set_child(item, entry);
+}
+
+static void
+setup_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    (void)user_data;
+    GtkWidget *entry = create_limit_entry();
+    g_object_set_data(G_OBJECT(entry), "direction", GUINT_TO_POINTER(DIRECTION_DOWNLOAD));
+    gtk_list_item_set_child(item, entry);
 }
 
 static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
@@ -173,21 +366,20 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
-static void bind_limits_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
-    GtkWidget *insc = gtk_list_item_get_child(item);
+    GtkWidget *entry = gtk_list_item_get_child(item);
+    g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
+    set_entry_to_value(GTK_EDITABLE(entry), proc->upload_kbps);
+}
 
-    g_autofree gchar *t;
-    if (proc->upload_bps == 0 && proc->download_bps == 0) {
-        t = g_strdup("-");
-    } else {
-        guint64 upload_kbps = (proc->upload_bps * 8) / 1000;
-        guint64 download_kbps = (proc->download_bps * 8) / 1000;
-        t = g_strdup_printf("%lu / %lu", (unsigned long)upload_kbps, (unsigned long)download_kbps);
-    }
-
-    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
+    (void)factory;
+    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    GtkWidget *entry = gtk_list_item_get_child(item);
+    g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
+    set_entry_to_value(GTK_EDITABLE(entry), proc->download_kbps);
 }
 
 static GtkColumnViewColumn *
@@ -209,8 +401,8 @@ static void append_process_to_store(
     int has_tcp,
     int has_udp,
     const char *exe_path,
-    guint64 upload_bps,
-    guint64 download_bps
+    guint32 upload_kbps,
+    guint32 download_kbps
 ) {
     const char *protocols;
     if (has_tcp && has_udp)
@@ -224,16 +416,12 @@ static void append_process_to_store(
 
     g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
     g_autoptr(StraitProcess) proc = strait_process_new(
-        name, (gint)pid, connections, protocols, exe_path, icon, upload_bps, download_bps
+        name, pid, connections, protocols, exe_path, icon, upload_kbps, download_kbps
     );
     g_list_store_append(store, G_OBJECT(proc));
 }
 
 static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
-
-static GListStore *get_store_from_view(GtkWidget *view) {
-    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
-}
 
 static void populate_store_from_raw(GListStore *store, const gchar *data) {
     clear_store(store);
@@ -244,8 +432,9 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
         return;
     }
 
-    int count = atoi(lines[0]);
-    if (count <= 0) {
+    gchar *endptr = NULL;
+    gint64 count = g_ascii_strtoll(lines[0], &endptr, 10);
+    if (endptr == lines[0] || *endptr != '\0' || count <= 0 || count > G_MAXINT) {
         g_strfreev(lines);
         return;
     }
@@ -253,11 +442,11 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
     int idx = 1;
     for (int i = 0; i < count && lines[idx] && lines[idx + 1]; i++) {
         int pid, connections, has_tcp, has_udp;
-        unsigned long upload, download;
+        unsigned int upload, download;
         char name[256] = {0};
         if (sscanf(
                 lines[idx],
-                "%d %d %d %d %lu %lu %255[^\n]",
+                "%d %d %d %d %u %u %255[^\n]",
                 &pid,
                 &connections,
                 &has_tcp,
@@ -267,21 +456,17 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
                 name
             ) == 7) {
             append_process_to_store(
-                store,
-                name,
-                (pid_t)pid,
-                connections,
-                has_tcp,
-                has_udp,
-                lines[idx + 1],
-                upload,
-                download
+                store, name, pid, connections, has_tcp, has_udp, lines[idx + 1], upload, download
             );
         }
         idx += 2;
     }
 
     g_strfreev(lines);
+}
+
+void strait_processes_view_set_backend(GtkWidget *view, StraitBackend *backend) {
+    g_object_set_data(G_OBJECT(view), "backend", backend);
 }
 
 GtkWidget *strait_processes_view_new(const gchar *raw_data) {
@@ -308,12 +493,30 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
-        make_column("Limits", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_limits_cb), 18)
+        make_column(
+            "Upload Limit (kbps)",
+            G_CALLBACK(setup_upload_limit_cb),
+            G_CALLBACK(bind_upload_limit_cb),
+            10
+        )
+    );
+    gtk_column_view_append_column(
+        GTK_COLUMN_VIEW(column_view),
+        make_column(
+            "Download Limit (kbps)",
+            G_CALLBACK(setup_download_limit_cb),
+            G_CALLBACK(bind_download_limit_cb),
+            10
+        )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
         make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
     );
+
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_widget_add_controller(column_view, GTK_EVENT_CONTROLLER(click));
+    g_signal_connect(click, "pressed", G_CALLBACK(on_column_view_pressed), column_view);
 
     GtkWidget *scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(

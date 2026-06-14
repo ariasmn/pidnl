@@ -13,10 +13,10 @@
 
 static StraitBackend *backend = NULL;
 
-static void cmd_list(void) {
+static void handle_list_cmd(void) {
     process_list *list = NULL;
     if (get_network_processes(&list) != DISCOVERY_OK) {
-        printf("%s\n", BACKEND_RESPONSE_ERROR);
+        printf("%d\n", BACKEND_RESPONSE_ERROR);
         fflush(stdout);
         return;
     }
@@ -26,14 +26,17 @@ static void cmd_list(void) {
         uint64_t upload = 0;
         uint64_t download = 0;
         get_rate_limits_from_cgroup(list->processes[i].pid, &upload, &download);
+        uint32_t upload_kbps = upload == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(upload * 8 / 1000);
+        uint32_t download_kbps =
+            download == 0 ? RATELIMIT_UNLIMITED : (uint32_t)(download * 8 / 1000);
         printf(
-            "%d %d %d %d %lu %lu %s\n%s\n",
+            "%d %d %d %d %u %u %s\n%s\n",
             list->processes[i].pid,
             list->processes[i].num_connections,
             list->processes[i].has_tcp,
             list->processes[i].has_udp,
-            (unsigned long)upload,
-            (unsigned long)download,
+            upload_kbps,
+            download_kbps,
             list->processes[i].process_name,
             list->processes[i].exe_path
         );
@@ -42,24 +45,57 @@ static void cmd_list(void) {
     destroy_process_list(list);
 }
 
+static void handle_limit_cmd(pid_t pid, uint32_t upload, uint32_t download) {
+    ratelimit_code rc;
+    if (upload == RATELIMIT_UNLIMITED && download == RATELIMIT_UNLIMITED) {
+        // TODO: Check if it makes sense to clean using the monitor itself, instead of doing this.
+        rc = unregister_rate_limiter_by_pid(pid);
+        if (rc == RATELIMIT_CGROUP_NOT_FOUND)
+            rc = RATELIMIT_OK;
+    } else {
+        rate_limit_config cfg = {.upload_kbps = upload, .download_kbps = download};
+        rc = limit_process_bandwidth(pid, cfg);
+    }
+
+    printf("%d\n", rc == RATELIMIT_OK ? BACKEND_RESPONSE_OK : BACKEND_RESPONSE_ERROR);
+    fflush(stdout);
+}
+
 static int run_privileged(void) {
-    ratelimit_init();
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    printf("%s\n", BACKEND_RESPONSE_READY);
+    ratelimit_code rc = ratelimit_init();
+    if (rc != RATELIMIT_OK) {
+        fprintf(stderr, "strait: ratelimit_init failed: %s\n", ratelimit_code_string(rc));
+        printf("%d\n", BACKEND_RESPONSE_ERROR);
+        return EXIT_FAILURE;
+    }
+
+    printf("%d\n", BACKEND_RESPONSE_READY);
 
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n')
-            line[len - 1] = '\0';
+        int cmd;
+        if (sscanf(line, "%d", &cmd) != 1)
+            continue;
 
-        if (strcmp(line, BACKEND_CMD_LIST) == 0) {
-            cmd_list();
+        if (cmd == BACKEND_CMD_LIST) {
+            handle_list_cmd();
             continue;
         }
 
-        if (strcmp(line, BACKEND_CMD_QUIT) == 0)
+        if (cmd == BACKEND_CMD_LIMIT) {
+            gint pid;
+            uint32_t upload, download;
+            if (sscanf(line, "%d %d %u %u", &cmd, &pid, &upload, &download) == 4)
+                handle_limit_cmd(pid, upload, download);
+            else
+                printf("%d\n", BACKEND_RESPONSE_ERROR);
+            fflush(stdout);
+            continue;
+        }
+
+        if (cmd == BACKEND_CMD_QUIT)
             break;
     }
 
@@ -112,7 +148,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
 
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(app));
     gtk_window_set_title(GTK_WINDOW(window), "Strait");
-    gtk_window_set_default_size(GTK_WINDOW(window), 900, 600);
+    gtk_window_set_default_size(GTK_WINDOW(window), 1200, 600);
     gtk_widget_set_size_request(window, 700, 400);
 
     GtkWidget *toolbar_view = adw_toolbar_view_new();
@@ -125,6 +161,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_tooltip_text(refresh_button, "Refresh");
 
     GtkWidget *processes_view = strait_processes_view_new(raw_data);
+    strait_processes_view_set_backend(processes_view, backend);
     g_object_set_data(G_OBJECT(window), "processes-view", processes_view);
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), processes_view);
     adw_header_bar_pack_end(header_bar, refresh_button);
