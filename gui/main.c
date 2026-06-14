@@ -13,7 +13,7 @@
 
 static StraitBackend *backend = NULL;
 
-static void cmd_list(void) {
+static void handle_list_cmd(void) {
     process_list *list = NULL;
     if (get_network_processes(&list) != DISCOVERY_OK) {
         printf("%s\n", BACKEND_RESPONSE_ERROR);
@@ -42,6 +42,30 @@ static void cmd_list(void) {
     destroy_process_list(list);
 }
 
+static void handle_limit_cmd(const char *line) {
+    gint pid;
+    guint upload, download;
+    if (sscanf(line, BACKEND_CMD_LIMIT " %d %u %u", &pid, &upload, &download) != 3) {
+        printf("%s\n", BACKEND_RESPONSE_ERROR);
+        fflush(stdout);
+        return;
+    }
+
+    ratelimit_code rc;
+    if (upload == RATELIMIT_UNLIMITED && download == RATELIMIT_UNLIMITED) {
+        // TODO: Check if it makes sense to clean using the monitor itself, instead of doing this.
+        rc = unregister_rate_limiter_by_pid((pid_t)pid);
+        if (rc == RATELIMIT_CGROUP_NOT_FOUND)
+            rc = RATELIMIT_OK;
+    } else {
+        rate_limit_config cfg = {.upload_kbps = upload, .download_kbps = download};
+        rc = limit_process_bandwidth((pid_t)pid, cfg);
+    }
+
+    printf("%s\n", rc == RATELIMIT_OK ? BACKEND_RESPONSE_OK : BACKEND_RESPONSE_ERROR);
+    fflush(stdout);
+}
+
 static int run_privileged(void) {
     ratelimit_init();
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -55,7 +79,12 @@ static int run_privileged(void) {
             line[len - 1] = '\0';
 
         if (strcmp(line, BACKEND_CMD_LIST) == 0) {
-            cmd_list();
+            handle_list_cmd();
+            continue;
+        }
+
+        if (strncmp(line, BACKEND_CMD_LIMIT, strlen(BACKEND_CMD_LIMIT)) == 0) {
+            handle_limit_cmd(line);
             continue;
         }
 
@@ -125,6 +154,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     gtk_widget_set_tooltip_text(refresh_button, "Refresh");
 
     GtkWidget *processes_view = strait_processes_view_new(raw_data);
+    strait_processes_view_set_backend(processes_view, backend);
     g_object_set_data(G_OBJECT(window), "processes-view", processes_view);
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), processes_view);
     adw_header_bar_pack_end(header_bar, refresh_button);

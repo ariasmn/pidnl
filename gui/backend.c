@@ -122,3 +122,25 @@ gchar *backend_list(StraitBackend *backend) {
 
     return g_string_free(response, FALSE);
 }
+
+gboolean
+backend_set_limit(StraitBackend *backend, gint pid, guint upload_kbps, guint download_kbps) {
+    if (!backend || !backend->stdin_channel || !backend->stdout_channel)
+        return FALSE;
+
+    gchar *cmd =
+        g_strdup_printf("%s %d %u %u\n", BACKEND_CMD_LIMIT, pid, upload_kbps, download_kbps);
+    g_io_channel_write_chars(backend->stdin_channel, cmd, -1, NULL, NULL);
+    g_io_channel_flush(backend->stdin_channel, NULL);
+    g_free(cmd);
+
+    gchar *line = NULL;
+    gsize len = 0;
+    if (g_io_channel_read_line(backend->stdout_channel, &line, &len, NULL, NULL) !=
+        G_IO_STATUS_NORMAL)
+        return FALSE;
+
+    gboolean ok = line && strncmp(line, BACKEND_RESPONSE_OK, strlen(BACKEND_RESPONSE_OK)) == 0;
+    g_free(line);
+    return ok;
+}

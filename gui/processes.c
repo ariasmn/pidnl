@@ -1,4 +1,5 @@
 #include "processes.h"
+#include "ratelimit.h"
 #include <gio/gdesktopappinfo.h>
 #include <string.h>
 
@@ -100,6 +101,161 @@ static StraitProcess *strait_process_new(
     return p;
 }
 
+static GListStore *get_store_from_view(GtkWidget *view) {
+    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
+}
+
+static StraitBackend *get_backend_from_view(GtkWidget *view) {
+    return g_object_get_data(G_OBJECT(view), "backend");
+}
+
+static StraitProcess *find_process_by_pid(GListStore *store, pid_t pid) {
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
+    for (guint i = 0; i < n; i++) {
+        g_autoptr(StraitProcess) proc =
+            STRAIT_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
+        if (proc->pid == pid)
+            return g_object_ref(proc);
+    }
+    return NULL;
+}
+
+static guint kbps_from_bps(guint64 bps) {
+    if (bps == 0) {
+        return RATELIMIT_UNLIMITED;
+    }
+    return (guint)((bps * 8) / 1000);
+}
+
+static guint64 bps_from_kbps(guint kbps) {
+    if (kbps == RATELIMIT_UNLIMITED) {
+        return 0;
+    }
+    return (guint64)kbps * 1000 / 8;
+}
+
+static guint parse_limit_value(const gchar *text) {
+    if (g_strcmp0(text, "") == 0 || g_strcmp0(text, "-") == 0) {
+        return RATELIMIT_UNLIMITED;
+    }
+    return (guint)g_ascii_strtoull(text, NULL, 10);
+}
+
+static void apply_limit(GtkEditable *editable) {
+    GtkWidget *entry = GTK_WIDGET(editable);
+    pid_t pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(entry), "pid"));
+    guint direction = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(entry), "direction"));
+    GtkWidget *view = gtk_widget_get_ancestor(entry, GTK_TYPE_SCROLLED_WINDOW);
+
+    if (!view || pid <= 0) {
+        return;
+    }
+
+    StraitBackend *backend = get_backend_from_view(view);
+    GListStore *store = get_store_from_view(view);
+    if (!backend || !store) {
+        return;
+    }
+
+    g_autofree gchar *trimmed = g_strdup(gtk_editable_get_text(editable));
+    g_strstrip(trimmed);
+
+    guint new_value = parse_limit_value(trimmed);
+    g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
+    guint upload = proc ? kbps_from_bps(proc->upload_bps) : RATELIMIT_UNLIMITED;
+    guint download = proc ? kbps_from_bps(proc->download_bps) : RATELIMIT_UNLIMITED;
+
+    if (direction == DIRECTION_UPLOAD) {
+        upload = new_value;
+    } else {
+        download = new_value;
+    }
+
+    if (!backend_set_limit(backend, pid, upload, download)) {
+        return;
+    }
+
+    if (!proc) {
+        return;
+    }
+
+    if (direction == DIRECTION_UPLOAD) {
+        proc->upload_bps = bps_from_kbps(upload);
+    } else {
+        proc->download_bps = bps_from_kbps(download);
+    }
+}
+
+static void on_limit_entry_activate(GtkEntry *entry) { apply_limit(GTK_EDITABLE(entry)); }
+
+static void on_limit_focus_leave(GtkEventControllerFocus *controller, gpointer user_data) {
+    (void)controller;
+    apply_limit(GTK_EDITABLE(user_data));
+}
+
+static void clear_focus_from_entry(GtkWidget *entry) {
+    GtkRoot *root = gtk_widget_get_root(entry);
+    if (root) {
+        gtk_root_set_focus(root, NULL);
+    }
+}
+
+static gboolean on_limit_entry_key_pressed(
+    GtkEventControllerKey *controller,
+    guint keyval,
+    guint keycode,
+    GdkModifierType state,
+    gpointer user_data
+) {
+    (void)controller;
+    (void)keycode;
+    (void)state;
+
+    if (keyval != GDK_KEY_Escape) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    clear_focus_from_entry(GTK_WIDGET(user_data));
+    return GDK_EVENT_STOP;
+}
+
+static void on_column_view_pressed(
+    GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data
+) {
+    (void)gesture;
+    (void)n_press;
+
+    GtkWidget *column_view = GTK_WIDGET(user_data);
+    GtkWidget *target = gtk_widget_pick(column_view, x, y, GTK_PICK_DEFAULT);
+
+    if (target && gtk_widget_get_ancestor(target, GTK_TYPE_ENTRY)) {
+        return;
+    }
+
+    GtkRoot *root = gtk_widget_get_root(column_view);
+    if (root) {
+        gtk_root_set_focus(root, NULL);
+    }
+}
+
+static GtkWidget *create_limit_entry(void) {
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_input_purpose(GTK_ENTRY(entry), GTK_INPUT_PURPOSE_NUMBER);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Unlimited");
+    gtk_entry_set_alignment(GTK_ENTRY(entry), 1.0f);
+
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    gtk_widget_add_controller(entry, focus);
+    g_signal_connect(focus, "leave", G_CALLBACK(on_limit_focus_leave), entry);
+    g_signal_connect(entry, "activate", G_CALLBACK(on_limit_entry_activate), NULL);
+
+    GtkEventController *key = gtk_event_controller_key_new();
+    gtk_widget_add_controller(entry, key);
+    g_signal_connect(key, "key-pressed", G_CALLBACK(on_limit_entry_key_pressed), entry);
+
+    return entry;
+}
+
 static void
 setup_column_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
     (void)factory;
@@ -131,6 +287,24 @@ setup_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer use
     gtk_box_append(GTK_BOX(box), insc);
 
     gtk_list_item_set_child(item, box);
+}
+
+static void
+setup_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    (void)user_data;
+    GtkWidget *entry = create_limit_entry();
+    g_object_set_data(G_OBJECT(entry), "direction", GINT_TO_POINTER(DIRECTION_UPLOAD));
+    gtk_list_item_set_child(item, entry);
+}
+
+static void
+setup_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    (void)factory;
+    (void)user_data;
+    GtkWidget *entry = create_limit_entry();
+    g_object_set_data(G_OBJECT(entry), "direction", GINT_TO_POINTER(DIRECTION_DOWNLOAD));
+    gtk_list_item_set_child(item, entry);
 }
 
 static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
@@ -176,21 +350,23 @@ static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *ite
 static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
-    GtkWidget *insc = gtk_list_item_get_child(item);
-    g_autofree gchar *t = g_strdup_printf("%lu", (unsigned long)((proc->upload_bps * 8) / 1000));
-    if (proc->upload_bps == 0)
-        t = g_strdup("-");
-    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+    GtkWidget *entry = gtk_list_item_get_child(item);
+    g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
+    g_autofree gchar *t = NULL;
+    if (proc->upload_bps != 0)
+        t = g_strdup_printf("%lu", (unsigned long)((proc->upload_bps * 8) / 1000));
+    gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
 }
 
 static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
     StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
-    GtkWidget *insc = gtk_list_item_get_child(item);
-    g_autofree gchar *t = g_strdup_printf("%lu", (unsigned long)((proc->download_bps * 8) / 1000));
-    if (proc->download_bps == 0)
-        t = g_strdup("-");
-    gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
+    GtkWidget *entry = gtk_list_item_get_child(item);
+    g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
+    g_autofree gchar *t = NULL;
+    if (proc->download_bps != 0)
+        t = g_strdup_printf("%lu", (unsigned long)((proc->download_bps * 8) / 1000));
+    gtk_editable_set_text(GTK_EDITABLE(entry), t ? t : "");
 }
 
 static GtkColumnViewColumn *
@@ -233,10 +409,6 @@ static void append_process_to_store(
 }
 
 static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
-
-static GListStore *get_store_from_view(GtkWidget *view) {
-    return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
-}
 
 static void populate_store_from_raw(GListStore *store, const gchar *data) {
     clear_store(store);
@@ -287,6 +459,10 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
     g_strfreev(lines);
 }
 
+void strait_processes_view_set_backend(GtkWidget *view, StraitBackend *backend) {
+    g_object_set_data(G_OBJECT(view), "backend", backend);
+}
+
 GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
 
@@ -312,14 +488,17 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
         make_column(
-            "Upload Limit (kbps)", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_upload_limit_cb), 10
+            "Upload Limit (kbps)",
+            G_CALLBACK(setup_upload_limit_cb),
+            G_CALLBACK(bind_upload_limit_cb),
+            10
         )
     );
     gtk_column_view_append_column(
         GTK_COLUMN_VIEW(column_view),
         make_column(
             "Download Limit (kbps)",
-            G_CALLBACK(setup_column_cb),
+            G_CALLBACK(setup_download_limit_cb),
             G_CALLBACK(bind_download_limit_cb),
             10
         )
@@ -328,6 +507,10 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
         GTK_COLUMN_VIEW(column_view),
         make_column("Command Line", G_CALLBACK(setup_column_cb), G_CALLBACK(bind_exe_path_cb), 30)
     );
+
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_widget_add_controller(column_view, GTK_EVENT_CONTROLLER(click));
+    g_signal_connect(click, "pressed", G_CALLBACK(on_column_view_pressed), column_view);
 
     GtkWidget *scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(
