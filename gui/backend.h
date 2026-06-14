@@ -8,6 +8,7 @@
 #define BACKEND_CMD_LIST 0
 #define BACKEND_CMD_LIMIT 1
 #define BACKEND_CMD_QUIT 2
+#define BACKEND_CMD_CLEAN 3
 #define BACKEND_RESPONSE_READY 0
 #define BACKEND_RESPONSE_OK 1
 #define BACKEND_RESPONSE_ERROR 2
@@ -19,4 +20,5 @@ void backend_stop(StraitBackend *backend);
 gchar *backend_list(StraitBackend *backend);
 gboolean
 backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps);
+gboolean backend_clean(StraitBackend *backend);
 #endif
