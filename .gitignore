@@ -3,6 +3,6 @@
 *.a
 *.la
 *.skel.h
-cli/strait
-gui/strait-gui
+cli/pidnl
+gui/pidnl-gui
 lib/tests/test_discovery

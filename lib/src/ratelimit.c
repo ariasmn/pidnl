@@ -14,7 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define CGROUP_NAME "strait"
+#define CGROUP_NAME "pidnl"
 
 static const char PROC_MOUNTS[] = "/proc/mounts";
 static const char CGROUP2_FS[] = "cgroup2";

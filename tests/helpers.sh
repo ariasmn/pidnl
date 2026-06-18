@@ -14,7 +14,7 @@ TESTS_FAILED=0
 CURRENT_TEST=""
 
 # The binary under test - default to local build
-STRAIT_BIN="${STRAIT_BIN:-./cli/strait}"
+PIDNL_BIN="${PIDNL_BIN:-./cli/pidnl}"
 
 # Test tracking
 FAILED_TESTS=()
@@ -120,11 +120,11 @@ print_summary() {
 
 # --- BPF and cgroup helpers ---
 
-# Check that a cgroup directory exists for a PID under /sys/fs/cgroup/strait/
+# Check that a cgroup directory exists for a PID under /sys/fs/cgroup/pidnl/
 assert_cgroup_exists() {
     local pid="$1"
-    if [ ! -d "/sys/fs/cgroup/strait/${pid}" ]; then
-        test_fail "cgroup /sys/fs/cgroup/strait/${pid} does not exist"
+    if [ ! -d "/sys/fs/cgroup/pidnl/${pid}" ]; then
+        test_fail "cgroup /sys/fs/cgroup/pidnl/${pid} does not exist"
         return 1
     fi
     return 0
@@ -133,8 +133,8 @@ assert_cgroup_exists() {
 # Check that a cgroup directory does NOT exist
 assert_cgroup_not_exists() {
     local pid="$1"
-    if [ -d "/sys/fs/cgroup/strait/${pid}" ]; then
-        test_fail "cgroup /sys/fs/cgroup/strait/${pid} still exists"
+    if [ -d "/sys/fs/cgroup/pidnl/${pid}" ]; then
+        test_fail "cgroup /sys/fs/cgroup/pidnl/${pid} still exists"
         return 1
     fi
     return 0

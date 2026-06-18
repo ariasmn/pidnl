@@ -6,7 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define PROGRAM_NAME "strait"
+#define PROGRAM_NAME "pidnl"
 #define PROGRAM_USAGE                                                                              \
     "Usage: " PROGRAM_NAME " [OPTIONS] COMMAND [ARGS]...\n"                                        \
     "Commands:\n"                                                                                  \
@@ -353,10 +353,10 @@ int main(int argc, char *argv[]) {
 
     /* Handle --help/-h anywhere in the argument list first.
      * This makes all of these work:
-     *   strait --help
-     *   strait -h
-     *   strait limit --help
-     *   strait clean --help
+     *   pidnl --help
+     *   pidnl -h
+     *   pidnl limit --help
+     *   pidnl clean --help
      * All of them print usage and exit 0, no root required.
      */
     if (has_help_flag(argc, argv)) {

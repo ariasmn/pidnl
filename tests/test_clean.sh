@@ -9,7 +9,7 @@ echo "------------"
 
 cleanup() {
     stop_nc_listener
-    "$STRAIT_BIN" clean -y >/dev/null 2>&1 || true
+    "$PIDNL_BIN" clean -y >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -18,7 +18,7 @@ trap cleanup EXIT
 start_nc_listener 9999
 
 set +e
-"$STRAIT_BIN" limit set "$_NC_PID" 1000 2000 >/dev/null 2>&1
+"$PIDNL_BIN" limit set "$_NC_PID" 1000 2000 >/dev/null 2>&1
 set -e
 
 test_start "cgroup exists after limit set"
@@ -32,7 +32,7 @@ if assert_bpf_attached; then
 fi
 
 test_start "'clean -y' removes cgroup"
-"$STRAIT_BIN" clean -y >/dev/null 2>&1
+"$PIDNL_BIN" clean -y >/dev/null 2>&1
 if assert_cgroup_not_exists "$_NC_PID"; then
     test_pass
 fi
@@ -45,17 +45,17 @@ fi
 test_start "'clean -y' exits 0"
 # Set limit again so clean has something to clean
 set +e
-"$STRAIT_BIN" limit set "$_NC_PID" 1000 1000 >/dev/null 2>&1
+"$PIDNL_BIN" limit set "$_NC_PID" 1000 1000 >/dev/null 2>&1
 set -e
-if assert_exit_code 0 "$STRAIT_BIN" clean -y; then
+if assert_exit_code 0 "$PIDNL_BIN" clean -y; then
     test_pass
 fi
 
 test_start "'clean -y' prints confirmation"
 set +e
-"$STRAIT_BIN" limit set "$_NC_PID" 1000 1000 >/dev/null 2>&1
+"$PIDNL_BIN" limit set "$_NC_PID" 1000 1000 >/dev/null 2>&1
 set -e
-output=$("$STRAIT_BIN" clean -y 2>/dev/null) || true
+output=$("$PIDNL_BIN" clean -y 2>/dev/null) || true
 if [[ "$output" == *"Cleanup complete"* ]]; then
     test_pass
 else
@@ -68,14 +68,14 @@ stop_nc_listener
 # --- clean with no prior limits ---
 
 test_start "'clean -y' with no limits exits 0"
-if assert_exit_code 0 "$STRAIT_BIN" clean -y; then
+if assert_exit_code 0 "$PIDNL_BIN" clean -y; then
     test_pass
 fi
 
 # --- clean without --yes prompts ---
 
 test_start "'clean --help' exits 0"
-if assert_exit_code 0 "$STRAIT_BIN" clean --help; then
+if assert_exit_code 0 "$PIDNL_BIN" clean --help; then
     test_pass
 fi
 

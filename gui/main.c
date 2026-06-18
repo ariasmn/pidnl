@@ -9,9 +9,9 @@
 #include "processes.h"
 #include "ratelimit.h"
 
-#define STRAIT_PRIVILEGED "--strait-privileged"
+#define PIDNL_PRIVILEGED "--pidnl-privileged"
 
-static StraitBackend *backend = NULL;
+static PIDNLBackend *backend = NULL;
 
 static void handle_list_cmd(void) {
     process_list *list = NULL;
@@ -69,7 +69,7 @@ static int run_privileged(void) {
 
     ratelimit_code rc = ratelimit_init();
     if (rc != RATELIMIT_OK) {
-        fprintf(stderr, "strait: ratelimit_init failed: %s\n", ratelimit_code_string(rc));
+        fprintf(stderr, "pidnl: ratelimit_init failed: %s\n", ratelimit_code_string(rc));
         printf("%d\n", BACKEND_RESPONSE_ERROR);
         return EXIT_FAILURE;
     }
@@ -116,7 +116,7 @@ static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
 
     gchar *raw_data = backend_list(backend);
     if (raw_data) {
-        strait_processes_view_refresh(view, raw_data);
+        pidnl_processes_view_refresh(view, raw_data);
         g_free(raw_data);
     }
 }
@@ -132,14 +132,14 @@ static void on_clean_response(AdwAlertDialog *dialog, const char *response, gpoi
 
     gchar *raw_data = backend_list(backend);
     if (raw_data) {
-        strait_processes_view_refresh(view, raw_data);
+        pidnl_processes_view_refresh(view, raw_data);
         g_free(raw_data);
     }
 }
 
 static void on_clean_clicked(GtkButton *button, gpointer user_data) {
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
-        "Clean up all rate limits?", "This will remove all rate limits created by Strait."
+        "Clean up all rate limits?", "This will remove all rate limits created by pidnl."
     ));
 
     adw_alert_dialog_add_responses(dialog, "cancel", "Cancel", "clean", "Clean", NULL);
@@ -185,7 +185,7 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     }
 
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(app));
-    gtk_window_set_title(GTK_WINDOW(window), "Strait");
+    gtk_window_set_title(GTK_WINDOW(window), "pidnl");
     gtk_window_set_default_size(GTK_WINDOW(window), 1200, 600);
     gtk_widget_set_size_request(window, 700, 400);
 
@@ -198,8 +198,8 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
     gtk_widget_set_tooltip_text(refresh_button, "Refresh");
 
-    GtkWidget *processes_view = strait_processes_view_new(raw_data);
-    strait_processes_view_set_backend(processes_view, backend);
+    GtkWidget *processes_view = pidnl_processes_view_new(raw_data);
+    pidnl_processes_view_set_backend(processes_view, backend);
     g_object_set_data(G_OBJECT(window), "processes-view", processes_view);
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked), processes_view);
     adw_header_bar_pack_end(header_bar, refresh_button);
@@ -218,12 +218,12 @@ static void on_activate(GtkApplication *app, gpointer user_data) {
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && strcmp(argv[1], STRAIT_PRIVILEGED) == 0) {
+    if (argc == 2 && strcmp(argv[1], PIDNL_PRIVILEGED) == 0) {
         return run_privileged();
     }
 
     AdwApplication *app =
-        adw_application_new("io.github.ariasmn.Strait", G_APPLICATION_DEFAULT_FLAGS);
+        adw_application_new("io.github.ariasmn.pidnl", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), NULL);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);

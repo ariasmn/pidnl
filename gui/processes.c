@@ -50,7 +50,7 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     return g_themed_icon_new("application-x-executable");
 }
 
-struct _StraitProcess {
+struct _PIDNLProcess {
     GObject parent_instance;
     gchar *name;
     pid_t pid;
@@ -62,24 +62,24 @@ struct _StraitProcess {
     guint32 download_kbps;
 };
 
-G_DEFINE_TYPE(StraitProcess, strait_process, G_TYPE_OBJECT)
+G_DEFINE_TYPE(PIDNLProcess, pidnl_process, G_TYPE_OBJECT)
 
-static void strait_process_finalize(GObject *object) {
-    StraitProcess *self = STRAIT_PROCESS(object);
+static void pidnl_process_finalize(GObject *object) {
+    PIDNLProcess *self = PIDNL_PROCESS(object);
     g_free(self->name);
     g_free(self->protocols);
     g_free(self->exe_path);
     g_clear_object(&self->icon);
-    G_OBJECT_CLASS(strait_process_parent_class)->finalize(object);
+    G_OBJECT_CLASS(pidnl_process_parent_class)->finalize(object);
 }
 
-static void strait_process_class_init(StraitProcessClass *klass) {
-    G_OBJECT_CLASS(klass)->finalize = strait_process_finalize;
+static void pidnl_process_class_init(PIDNLProcessClass *klass) {
+    G_OBJECT_CLASS(klass)->finalize = pidnl_process_finalize;
 }
 
-static void strait_process_init(StraitProcess *self) { (void)self; }
+static void pidnl_process_init(PIDNLProcess *self) { (void)self; }
 
-static StraitProcess *strait_process_new(
+static PIDNLProcess *pidnl_process_new(
     const gchar *name,
     pid_t pid,
     gint connections,
@@ -89,7 +89,7 @@ static StraitProcess *strait_process_new(
     guint32 upload_kbps,
     guint32 download_kbps
 ) {
-    StraitProcess *p = g_object_new(STRAIT_TYPE_PROCESS, NULL);
+    PIDNLProcess *p = g_object_new(PIDNL_TYPE_PROCESS, NULL);
     p->name = g_strdup(name);
     p->pid = pid;
     p->connections = connections;
@@ -105,15 +105,14 @@ static GListStore *get_store_from_view(GtkWidget *view) {
     return G_LIST_STORE(g_object_get_data(G_OBJECT(view), "store"));
 }
 
-static StraitBackend *get_backend_from_view(GtkWidget *view) {
+static PIDNLBackend *get_backend_from_view(GtkWidget *view) {
     return g_object_get_data(G_OBJECT(view), "backend");
 }
 
-static StraitProcess *find_process_by_pid(GListStore *store, pid_t pid) {
+static PIDNLProcess *find_process_by_pid(GListStore *store, pid_t pid) {
     guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
     for (guint i = 0; i < n; i++) {
-        g_autoptr(StraitProcess) proc =
-            STRAIT_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
+        g_autoptr(PIDNLProcess) proc = PIDNL_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
         if (proc->pid == pid)
             return g_object_ref(proc);
     }
@@ -163,13 +162,13 @@ static void apply_limit(GtkEditable *editable) {
         return;
     }
 
-    StraitBackend *backend = get_backend_from_view(view);
+    PIDNLBackend *backend = get_backend_from_view(view);
     GListStore *store = get_store_from_view(view);
     if (!backend || !store) {
         return;
     }
 
-    g_autoptr(StraitProcess) proc = find_process_by_pid(store, pid);
+    g_autoptr(PIDNLProcess) proc = find_process_by_pid(store, pid);
     guint upload = proc ? proc->upload_kbps : RATELIMIT_UNLIMITED;
     guint download = proc ? proc->download_kbps : RATELIMIT_UNLIMITED;
     guint current = direction == DIRECTION_UPLOAD ? upload : download;
@@ -328,7 +327,7 @@ setup_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item, gp
 
 static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *box = gtk_list_item_get_child(item);
     GtkWidget *image = gtk_widget_get_first_child(box);
     GtkWidget *insc = gtk_widget_get_last_child(box);
@@ -338,7 +337,7 @@ static void bind_name_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
 
 static void bind_pid_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *insc = gtk_list_item_get_child(item);
     g_autofree gchar *t = g_strdup_printf("%d", proc->pid);
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
@@ -346,7 +345,7 @@ static void bind_pid_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
 
 static void bind_connections_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *insc = gtk_list_item_get_child(item);
     g_autofree gchar *t = g_strdup_printf("%d", proc->connections);
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), t);
@@ -354,21 +353,21 @@ static void bind_connections_cb(GtkSignalListItemFactory *factory, GtkListItem *
 
 static void bind_protocols_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *insc = gtk_list_item_get_child(item);
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->protocols);
 }
 
 static void bind_exe_path_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *insc = gtk_list_item_get_child(item);
     gtk_inscription_set_text(GTK_INSCRIPTION(insc), proc->exe_path);
 }
 
 static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
     set_entry_to_value(GTK_EDITABLE(entry), proc->upload_kbps);
@@ -376,7 +375,7 @@ static void bind_upload_limit_cb(GtkSignalListItemFactory *factory, GtkListItem 
 
 static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListItem *item) {
     (void)factory;
-    StraitProcess *proc = STRAIT_PROCESS(gtk_list_item_get_item(item));
+    PIDNLProcess *proc = PIDNL_PROCESS(gtk_list_item_get_item(item));
     GtkWidget *entry = gtk_list_item_get_child(item);
     g_object_set_data(G_OBJECT(entry), "pid", GINT_TO_POINTER(proc->pid));
     set_entry_to_value(GTK_EDITABLE(entry), proc->download_kbps);
@@ -384,22 +383,22 @@ static void bind_download_limit_cb(GtkSignalListItemFactory *factory, GtkListIte
 
 static gint compare_name(gconstpointer a, gconstpointer b, gpointer user_data) {
     (void)user_data;
-    const StraitProcess *pa = a;
-    const StraitProcess *pb = b;
+    const PIDNLProcess *pa = a;
+    const PIDNLProcess *pb = b;
     return g_utf8_collate(pa->name ? pa->name : "", pb->name ? pb->name : "");
 }
 
 static gint compare_pid(gconstpointer a, gconstpointer b, gpointer user_data) {
     (void)user_data;
-    const StraitProcess *pa = a;
-    const StraitProcess *pb = b;
+    const PIDNLProcess *pa = a;
+    const PIDNLProcess *pb = b;
     return (pa->pid > pb->pid) - (pa->pid < pb->pid);
 }
 
 static gint compare_connections(gconstpointer a, gconstpointer b, gpointer user_data) {
     (void)user_data;
-    const StraitProcess *pa = a;
-    const StraitProcess *pb = b;
+    const PIDNLProcess *pa = a;
+    const PIDNLProcess *pb = b;
     return (pa->connections > pb->connections) - (pa->connections < pb->connections);
 }
 
@@ -441,7 +440,7 @@ static void append_process_to_store(
         protocols = "-";
 
     g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
-    g_autoptr(StraitProcess) proc = strait_process_new(
+    g_autoptr(PIDNLProcess) proc = pidnl_process_new(
         name, pid, connections, protocols, exe_path, icon, upload_kbps, download_kbps
     );
     g_list_store_append(store, G_OBJECT(proc));
@@ -491,12 +490,12 @@ static void populate_store_from_raw(GListStore *store, const gchar *data) {
     g_strfreev(lines);
 }
 
-void strait_processes_view_set_backend(GtkWidget *view, StraitBackend *backend) {
+void pidnl_processes_view_set_backend(GtkWidget *view, PIDNLBackend *backend) {
     g_object_set_data(G_OBJECT(view), "backend", backend);
 }
 
-GtkWidget *strait_processes_view_new(const gchar *raw_data) {
-    GListStore *store = g_list_store_new(STRAIT_TYPE_PROCESS);
+GtkWidget *pidnl_processes_view_new(const gchar *raw_data) {
+    GListStore *store = g_list_store_new(PIDNL_TYPE_PROCESS);
 
     GtkSortListModel *sort_model = gtk_sort_list_model_new(G_LIST_MODEL(store), NULL);
     g_autoptr(GtkNoSelection) selection = gtk_no_selection_new(G_LIST_MODEL(sort_model));
@@ -588,7 +587,7 @@ GtkWidget *strait_processes_view_new(const gchar *raw_data) {
     return scrolled;
 }
 
-void strait_processes_view_refresh(GtkWidget *view, const gchar *raw_data) {
+void pidnl_processes_view_refresh(GtkWidget *view, const gchar *raw_data) {
     GListStore *store = get_store_from_view(view);
     populate_store_from_raw(store, raw_data);
 }
