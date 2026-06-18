@@ -47,8 +47,9 @@ static void handle_limit_cmd(pid_t pid, uint32_t upload, uint32_t download) {
     if (upload == RATELIMIT_UNLIMITED && download == RATELIMIT_UNLIMITED) {
         // TODO: Check if it makes sense to clean using the monitor itself, instead of doing this.
         rc = unregister_rate_limiter_by_pid(pid);
-        if (rc == RATELIMIT_CGROUP_NOT_FOUND)
+        if (rc == RATELIMIT_CGROUP_NOT_FOUND) {
             rc = RATELIMIT_OK;
+        }
     } else {
         rate_limit_config cfg = {.upload_kbps = upload, .download_kbps = download};
         rc = limit_process_bandwidth(pid, cfg);
@@ -79,8 +80,9 @@ static int run_privileged(void) {
     char line[64];
     while (fgets(line, sizeof(line), stdin)) {
         int cmd;
-        if (sscanf(line, "%d", &cmd) != 1)
+        if (sscanf(line, "%d", &cmd) != 1) {
             continue;
+        }
 
         if (cmd == BACKEND_CMD_LIST) {
             handle_list_cmd();
@@ -90,10 +92,11 @@ static int run_privileged(void) {
         if (cmd == BACKEND_CMD_LIMIT) {
             gint pid;
             uint32_t upload, download;
-            if (sscanf(line, "%d %d %u %u", &cmd, &pid, &upload, &download) == 4)
+            if (sscanf(line, "%d %d %u %u", &cmd, &pid, &upload, &download) == 4) {
                 handle_limit_cmd(pid, upload, download);
-            else
+            } else {
                 printf("%d\n", BACKEND_RESPONSE_ERROR);
+            }
             fflush(stdout);
             continue;
         }
@@ -103,8 +106,9 @@ static int run_privileged(void) {
             continue;
         }
 
-        if (cmd == BACKEND_CMD_QUIT)
+        if (cmd == BACKEND_CMD_QUIT) {
             break;
+        }
     }
 
     return EXIT_SUCCESS;
@@ -123,12 +127,14 @@ static void on_refresh_clicked(GtkButton *button, gpointer user_data) {
 
 static void on_clean_response(AdwAlertDialog *dialog, const char *response, gpointer user_data) {
     (void)dialog;
-    if (g_strcmp0(response, "clean") != 0)
+    if (g_strcmp0(response, "clean") != 0) {
         return;
+    }
 
     GtkWidget *view = GTK_WIDGET(user_data);
-    if (!backend_clean(backend))
+    if (!backend_clean(backend)) {
         return;
+    }
 
     gchar *raw_data = backend_list(backend);
     if (raw_data) {
