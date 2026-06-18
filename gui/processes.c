@@ -112,8 +112,7 @@ static PIDNLBackend *get_backend_from_view(GtkWidget *view) {
 static PIDNLProcess *find_process_by_pid(GListStore *store, pid_t pid) {
     guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
     for (guint i = 0; i < n; i++) {
-        g_autoptr(PIDNLProcess) proc =
-            PIDNL_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
+        g_autoptr(PIDNLProcess) proc = PIDNL_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
         if (proc->pid == pid)
             return g_object_ref(proc);
     }
