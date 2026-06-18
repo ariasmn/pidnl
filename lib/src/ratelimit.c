@@ -8,16 +8,15 @@
 #include <fcntl.h>
 #include <libcgroup.h>
 #include <linux/limits.h>
-#include <mntent.h>
+#include <linux/magic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 
 #define CGROUP_NAME "pidnl"
 
-static const char PROC_MOUNTS[] = "/proc/mounts";
-static const char CGROUP2_FS[] = "cgroup2";
 static const char CGROUP_WALK_CONTROLLER[] = "cpu";
 
 const uint32_t RATELIMIT_UNLIMITED = UINT32_MAX;
@@ -34,26 +33,31 @@ struct rate_limiter {
     int cgroup_fd;
 };
 
-static int open_cgroup_fd(const char *name) {
-    char path[PATH_MAX];
-    FILE *f;
-    struct mntent *ent;
 
-    f = setmntent(PROC_MOUNTS, "r");
-    if (!f) {
+static int get_cgroup2_mount(char *buf, size_t size) {
+    char *mount_point = NULL;
+    if (cgroup_get_subsys_mount_point(CGROUP_WALK_CONTROLLER, &mount_point) != 0) {
         return -1;
     }
 
-    while ((ent = getmntent(f)) != NULL) {
-        if (strcmp(ent->mnt_type, CGROUP2_FS) == 0) {
-            snprintf(path, sizeof(path), "%s/%s", ent->mnt_dir, name);
-            endmntent(f);
-            return open(path, O_RDONLY);
-        }
+    struct statfs fs;
+    int is_cgroup2 = statfs(mount_point, &fs) == 0 && fs.f_type == CGROUP2_SUPER_MAGIC;
+    if (is_cgroup2) {
+        snprintf(buf, size, "%s", mount_point);
+    }
+    free(mount_point);
+    return is_cgroup2 ? 0 : -1;
+}
+
+static int open_cgroup_fd(const char *name) {
+    char mount[PATH_MAX];
+    if (get_cgroup2_mount(mount, sizeof(mount)) != 0) {
+        return -1;
     }
 
-    endmntent(f);
-    return -1;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", mount, name);
+    return open(path, O_RDONLY);
 }
 
 static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
@@ -156,6 +160,11 @@ static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
 ratelimit_code ratelimit_init(void) {
     if (cgroup_init() != 0) {
         return RATELIMIT_LIBCG_INIT;
+    }
+
+    char mount[PATH_MAX];
+    if (get_cgroup2_mount(mount, sizeof(mount)) != 0) {
+        return RATELIMIT_NO_CGROUP2;
     }
     return RATELIMIT_OK;
 }
@@ -449,6 +458,8 @@ const char *ratelimit_code_string(ratelimit_code code) {
         return "Failed to attach process to cgroup";
     case RATELIMIT_LIBCG_DELETE:
         return "Failed to delete cgroup";
+    case RATELIMIT_NO_CGROUP2:
+        return "cgroup v2 is required but not available";
     default:
         return "Unknown error";
     }
