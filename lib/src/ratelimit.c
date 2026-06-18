@@ -33,7 +33,6 @@ struct rate_limiter {
     int cgroup_fd;
 };
 
-
 static int get_cgroup2_mount(char *buf, size_t size) {
     char *mount_point = NULL;
     if (cgroup_get_subsys_mount_point(CGROUP_WALK_CONTROLLER, &mount_point) != 0) {
