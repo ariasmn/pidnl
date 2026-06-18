@@ -13,12 +13,12 @@
 #define BACKEND_RESPONSE_OK 1
 #define BACKEND_RESPONSE_ERROR 2
 
-typedef struct StraitBackend StraitBackend;
+typedef struct PIDNLBackend PIDNLBackend;
 
-gboolean backend_start(StraitBackend **backend, const gchar *executable_path);
-void backend_stop(StraitBackend *backend);
-gchar *backend_list(StraitBackend *backend);
+gboolean backend_start(PIDNLBackend **backend, const gchar *executable_path);
+void backend_stop(PIDNLBackend *backend);
+gchar *backend_list(PIDNLBackend *backend);
 gboolean
-backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps);
-gboolean backend_clean(StraitBackend *backend);
+backend_set_limit(PIDNLBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps);
+gboolean backend_clean(PIDNLBackend *backend);
 #endif

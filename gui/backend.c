@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <sys/wait.h>
 
-struct StraitBackend {
+struct PIDNLBackend {
     GPid pid;
     GIOChannel *stdin_channel;
     GIOChannel *stdout_channel;
@@ -20,8 +20,8 @@ static gint parse_protocol_int(const gchar *str) {
     return (gint)value;
 }
 
-gboolean backend_start(StraitBackend **backend, const gchar *executable_path) {
-    gchar *argv[] = {"pkexec", (gchar *)executable_path, "--strait-privileged", NULL};
+gboolean backend_start(PIDNLBackend **backend, const gchar *executable_path) {
+    gchar *argv[] = {"pkexec", (gchar *)executable_path, "--pidnl-privileged", NULL};
     gint stdin_fd, stdout_fd;
     GError *error = NULL;
     GPid pid;
@@ -45,7 +45,7 @@ gboolean backend_start(StraitBackend **backend, const gchar *executable_path) {
         return FALSE;
     }
 
-    *backend = g_new0(StraitBackend, 1);
+    *backend = g_new0(PIDNLBackend, 1);
     (*backend)->pid = pid;
     (*backend)->stdin_channel = g_io_channel_unix_new(stdin_fd);
     (*backend)->stdout_channel = g_io_channel_unix_new(stdout_fd);
@@ -69,7 +69,7 @@ gboolean backend_start(StraitBackend **backend, const gchar *executable_path) {
     return TRUE;
 }
 
-void backend_stop(StraitBackend *backend) {
+void backend_stop(PIDNLBackend *backend) {
     if (!backend)
         return;
 
@@ -94,7 +94,7 @@ void backend_stop(StraitBackend *backend) {
     g_free(backend);
 }
 
-gchar *backend_list(StraitBackend *backend) {
+gchar *backend_list(PIDNLBackend *backend) {
     if (!backend || !backend->stdin_channel || !backend->stdout_channel)
         return NULL;
 
@@ -134,7 +134,7 @@ gchar *backend_list(StraitBackend *backend) {
 }
 
 gboolean
-backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps) {
+backend_set_limit(PIDNLBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps) {
     if (!backend || !backend->stdin_channel || !backend->stdout_channel)
         return FALSE;
 
@@ -155,7 +155,7 @@ backend_set_limit(StraitBackend *backend, pid_t pid, uint32_t upload_kbps, uint3
     return code == BACKEND_RESPONSE_OK;
 }
 
-gboolean backend_clean(StraitBackend *backend) {
+gboolean backend_clean(PIDNLBackend *backend) {
     if (!backend || !backend->stdin_channel || !backend->stdout_channel)
         return FALSE;
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export STRAIT_BIN="${STRAIT_BIN:-./cli/strait}"
+export PIDNL_BIN="${PIDNL_BIN:-./cli/pidnl}"
 
 TOTAL_RUN=0
 TOTAL_PASSED=0
@@ -10,13 +10,13 @@ TOTAL_FAILED=0
 FAILED_SUITES=()
 
 echo "========================================="
-echo "  strait functional tests"
-echo "  binary: $STRAIT_BIN"
+echo "  pidnl functional tests"
+echo "  binary: $PIDNL_BIN"
 echo "========================================="
 echo ""
 
-if [ ! -x "$STRAIT_BIN" ]; then
-    echo "ERROR: binary not found or not executable: $STRAIT_BIN"
+if [ ! -x "$PIDNL_BIN" ]; then
+    echo "ERROR: binary not found or not executable: $PIDNL_BIN"
     echo "Run 'make dev' first."
     exit 1
 fi

@@ -5,13 +5,13 @@ ARCH_INCLUDE = /usr/include/$(shell $(CC) -print-multiarch 2>/dev/null || echo "
 
 LIBSRC = lib/src
 CLI_OBJ = cli/main.o
-CLI_BIN = cli/strait
+CLI_BIN = cli/pidnl
 BPF_SRC = lib/src/ratelimit.bpf.c
 BPF_OBJ = $(LIBSRC)/ratelimit.bpf.o
 BPF_SKEL = $(LIBSRC)/ratelimit_bpf.skel.h
 
 GUI_OBJ = gui/main.o gui/processes.o gui/backend.o
-GUI_BIN = gui/strait-gui
+GUI_BIN = gui/pidnl-gui
 GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 

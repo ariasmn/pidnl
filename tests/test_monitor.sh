@@ -14,7 +14,7 @@ cleanup() {
         kill "$NC_PID" 2>/dev/null || true
         wait "$NC_PID" 2>/dev/null || true
     fi
-    "$STRAIT_BIN" clean -y >/dev/null 2>&1 || true
+    "$PIDNL_BIN" clean -y >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -22,7 +22,7 @@ nc -l -p 9999 >/dev/null 2>&1 &
 NC_PID=$!
 sleep 0.5
 
-"$STRAIT_BIN" limit set "$NC_PID" 1000 2000 >/dev/null 2>&1
+"$PIDNL_BIN" limit set "$NC_PID" 1000 2000 >/dev/null 2>&1
 
 SAVED_PID="$NC_PID"
 kill "$NC_PID" 2>/dev/null || true

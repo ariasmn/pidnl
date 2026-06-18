@@ -24,7 +24,7 @@ NC_PID=$!
 sleep 0.5
 
 test_start "'list' shows process with TCP socket"
-output=$("$STRAIT_BIN" list 2>/dev/null) || true
+output=$("$PIDNL_BIN" list 2>/dev/null) || true
 if [[ "$output" == *"$NC_PID"* ]] || [[ "$output" == *"nc"* ]]; then
     test_pass
 else
@@ -33,7 +33,7 @@ else
 fi
 
 test_start "'list' shows TCP column with 'Yes'"
-output=$("$STRAIT_BIN" list 2>/dev/null) || true
+output=$("$PIDNL_BIN" list 2>/dev/null) || true
 if [[ "$output" == *"Yes"* ]]; then
     test_pass
 else
@@ -42,14 +42,14 @@ else
 fi
 
 test_start "'list' exits 0"
-if assert_exit_code 0 "$STRAIT_BIN" list; then
+if assert_exit_code 0 "$PIDNL_BIN" list; then
     test_pass
 fi
 
 # --- list shows header row ---
 
 test_start "'list' shows header row"
-output=$("$STRAIT_BIN" list 2>/dev/null) || true
+output=$("$PIDNL_BIN" list 2>/dev/null) || true
 if [[ "$output" == *"PID"* ]] && [[ "$output" == *"NAME"* ]] && [[ "$output" == *"EXECUTABLE"* ]]; then
     test_pass
 else
