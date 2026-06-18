@@ -9,13 +9,15 @@ struct PIDNLBackend {
 };
 
 static gint parse_protocol_int(const gchar *str) {
-    if (!str)
+    if (!str) {
         return -1;
+    }
 
     gchar *endptr = NULL;
     gint64 value = g_ascii_strtoll(str, &endptr, 10);
-    if (endptr == str || value < 0 || value > G_MAXINT)
+    if (endptr == str || value < 0 || value > G_MAXINT) {
         return -1;
+    }
 
     return (gint)value;
 }
@@ -70,8 +72,9 @@ gboolean backend_start(PIDNLBackend **backend, const gchar *executable_path) {
 }
 
 void backend_stop(PIDNLBackend *backend) {
-    if (!backend)
+    if (!backend) {
         return;
+    }
 
     if (backend->stdin_channel) {
         gchar *quit_cmd = g_strdup_printf("%d\n", BACKEND_CMD_QUIT);
@@ -95,8 +98,9 @@ void backend_stop(PIDNLBackend *backend) {
 }
 
 gchar *backend_list(PIDNLBackend *backend) {
-    if (!backend || !backend->stdin_channel || !backend->stdout_channel)
+    if (!backend || !backend->stdin_channel || !backend->stdout_channel) {
         return NULL;
+    }
 
     gchar *cmd = g_strdup_printf("%d\n", BACKEND_CMD_LIST);
     g_io_channel_write_chars(backend->stdin_channel, cmd, -1, NULL, NULL);
@@ -124,8 +128,9 @@ gchar *backend_list(PIDNLBackend *backend) {
 
     for (int i = 0; i < count * 2; i++) {
         status = g_io_channel_read_line(backend->stdout_channel, &line, &len, NULL, NULL);
-        if (status != G_IO_STATUS_NORMAL)
+        if (status != G_IO_STATUS_NORMAL) {
             break;
+        }
         g_string_append(response, line);
         g_free(line);
     }
@@ -135,8 +140,9 @@ gchar *backend_list(PIDNLBackend *backend) {
 
 gboolean
 backend_set_limit(PIDNLBackend *backend, pid_t pid, uint32_t upload_kbps, uint32_t download_kbps) {
-    if (!backend || !backend->stdin_channel || !backend->stdout_channel)
+    if (!backend || !backend->stdin_channel || !backend->stdout_channel) {
         return FALSE;
+    }
 
     gchar *cmd =
         g_strdup_printf("%d %d %u %u\n", BACKEND_CMD_LIMIT, pid, upload_kbps, download_kbps);
@@ -147,8 +153,9 @@ backend_set_limit(PIDNLBackend *backend, pid_t pid, uint32_t upload_kbps, uint32
     gchar *line = NULL;
     gsize len = 0;
     if (g_io_channel_read_line(backend->stdout_channel, &line, &len, NULL, NULL) !=
-        G_IO_STATUS_NORMAL)
+        G_IO_STATUS_NORMAL) {
         return FALSE;
+    }
 
     gint code = parse_protocol_int(line);
     g_free(line);
@@ -156,8 +163,9 @@ backend_set_limit(PIDNLBackend *backend, pid_t pid, uint32_t upload_kbps, uint32
 }
 
 gboolean backend_clean(PIDNLBackend *backend) {
-    if (!backend || !backend->stdin_channel || !backend->stdout_channel)
+    if (!backend || !backend->stdin_channel || !backend->stdout_channel) {
         return FALSE;
+    }
 
     gchar *cmd = g_strdup_printf("%d\n", BACKEND_CMD_CLEAN);
     g_io_channel_write_chars(backend->stdin_channel, cmd, -1, NULL, NULL);
@@ -167,8 +175,9 @@ gboolean backend_clean(PIDNLBackend *backend) {
     gchar *line = NULL;
     gsize len = 0;
     if (g_io_channel_read_line(backend->stdout_channel, &line, &len, NULL, NULL) !=
-        G_IO_STATUS_NORMAL)
+        G_IO_STATUS_NORMAL) {
         return FALSE;
+    }
 
     gint code = parse_protocol_int(line);
     g_free(line);

@@ -318,10 +318,12 @@ static int monitor_ensure_running(void) {
 // Send command to monitor, returns monitor_code
 static monitor_code send_command(int cmd, pid_t pid) {
     if (is_monitor_process) {
-        if (cmd == CMD_WATCH)
+        if (cmd == CMD_WATCH) {
             return add_pid_to_watch(pid);
-        if (cmd == CMD_UNWATCH)
+        }
+        if (cmd == CMD_UNWATCH) {
             return remove_pid_from_watch(pid);
+        }
         return MONITOR_NOT_FOUND;
     }
 
@@ -347,9 +349,13 @@ static monitor_code send_command(int cmd, pid_t pid) {
     return (monitor_code)result;
 }
 
-monitor_code monitor_watch_pid(pid_t pid) { return send_command(CMD_WATCH, pid); }
+monitor_code monitor_watch_pid(pid_t pid) {
+    return send_command(CMD_WATCH, pid);
+}
 
-monitor_code monitor_unwatch_pid(pid_t pid) { return send_command(CMD_UNWATCH, pid); }
+monitor_code monitor_unwatch_pid(pid_t pid) {
+    return send_command(CMD_UNWATCH, pid);
+}
 
 monitor_code monitor_stop(void) {
     int fd = monitor_connect();
