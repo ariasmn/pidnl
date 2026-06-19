@@ -6,8 +6,9 @@
 static GList *all_apps = NULL;
 
 static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_t pid) {
-    if (!all_apps)
+    if (!all_apps) {
         all_apps = g_app_info_get_all();
+    }
 
     const gchar *exe_base = exe_path ? strrchr(exe_path, '/') : NULL;
     exe_base = exe_base ? exe_base + 1 : exe_path;
@@ -15,8 +16,9 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     for (GList *l = all_apps; l; l = l->next) {
         GAppInfo *info = l->data;
         const gchar *exec = g_app_info_get_executable(info);
-        if (!exec)
+        if (!exec) {
             continue;
+        }
 
         const gchar *exec_base = strrchr(exec, '/');
         exec_base = exec_base ? exec_base + 1 : exec;
@@ -31,13 +33,15 @@ static GIcon *lookup_icon(const gchar *exe_path, const gchar *process_name, pid_
     gchar cgroup_path[64];
     g_snprintf(cgroup_path, sizeof(cgroup_path), "/proc/%d/cgroup", pid);
     g_autofree gchar *cgroup = NULL;
-    if (!g_file_get_contents(cgroup_path, &cgroup, NULL, NULL))
+    if (!g_file_get_contents(cgroup_path, &cgroup, NULL, NULL)) {
         return g_themed_icon_new("application-x-executable");
+    }
 
     for (GList *l = all_apps; l; l = l->next) {
         GAppInfo *info = l->data;
-        if (!G_IS_DESKTOP_APP_INFO(info))
+        if (!G_IS_DESKTOP_APP_INFO(info)) {
             continue;
+        }
 
         g_autofree gchar *flatpak_id =
             g_desktop_app_info_get_string(G_DESKTOP_APP_INFO(info), "X-Flatpak");
@@ -77,7 +81,9 @@ static void pidnl_process_class_init(PIDNLProcessClass *klass) {
     G_OBJECT_CLASS(klass)->finalize = pidnl_process_finalize;
 }
 
-static void pidnl_process_init(PIDNLProcess *self) { (void)self; }
+static void pidnl_process_init(PIDNLProcess *self) {
+    (void)self;
+}
 
 static PIDNLProcess *pidnl_process_new(
     const gchar *name,
@@ -113,8 +119,9 @@ static PIDNLProcess *find_process_by_pid(GListStore *store, pid_t pid) {
     guint n = g_list_model_get_n_items(G_LIST_MODEL(store));
     for (guint i = 0; i < n; i++) {
         g_autoptr(PIDNLProcess) proc = PIDNL_PROCESS(g_list_model_get_item(G_LIST_MODEL(store), i));
-        if (proc->pid == pid)
+        if (proc->pid == pid) {
             return g_object_ref(proc);
+        }
     }
     return NULL;
 }
@@ -204,7 +211,9 @@ static void apply_limit(GtkEditable *editable) {
     set_entry_to_value(editable, new_value);
 }
 
-static void on_limit_entry_activate(GtkEntry *entry) { apply_limit(GTK_EDITABLE(entry)); }
+static void on_limit_entry_activate(GtkEntry *entry) {
+    apply_limit(GTK_EDITABLE(entry));
+}
 
 static void on_limit_focus_leave(GtkEventControllerFocus *controller, gpointer user_data) {
     (void)controller;
@@ -430,14 +439,15 @@ static void append_process_to_store(
     guint32 download_kbps
 ) {
     const char *protocols;
-    if (has_tcp && has_udp)
+    if (has_tcp && has_udp) {
         protocols = "TCP/UDP";
-    else if (has_tcp)
+    } else if (has_tcp) {
         protocols = "TCP";
-    else if (has_udp)
+    } else if (has_udp) {
         protocols = "UDP";
-    else
+    } else {
         protocols = "-";
+    }
 
     g_autoptr(GIcon) icon = lookup_icon(exe_path, name, pid);
     g_autoptr(PIDNLProcess) proc = pidnl_process_new(
@@ -446,7 +456,9 @@ static void append_process_to_store(
     g_list_store_append(store, G_OBJECT(proc));
 }
 
-static void clear_store(GListStore *store) { g_list_store_remove_all(store); }
+static void clear_store(GListStore *store) {
+    g_list_store_remove_all(store);
+}
 
 static void populate_store_from_raw(GListStore *store, const gchar *data) {
     clear_store(store);

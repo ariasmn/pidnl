@@ -9,3 +9,11 @@ BinPackParameters: false
 BinPackArguments: false
 BreakBeforeBinaryOperators: None
 ColumnLimit: 100
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+KeepEmptyLinesAtTheStartOfBlocks: false
