@@ -1,6 +1,13 @@
 CC = clang
 CFLAGS = -Wall -Wextra -Werror -g -fsanitize=address -fno-omit-frame-pointer
 LDFLAGS = -fsanitize=address
+RELEASE_CFLAGS = -O2 -Wall -Wextra \
+	-D_FORTIFY_SOURCE=2 \
+	-fstack-protector-strong \
+	-fstack-clash-protection \
+	-fcf-protection=full \
+	-fPIE
+RELEASE_LDFLAGS = -pie -s -Wl,-z,relro,-z,now -Wl,-z,noexecstack
 ARCH_INCLUDE = /usr/include/$(shell $(CC) -print-multiarch 2>/dev/null || echo "$(shell uname -m)-linux-gnu")
 
 LIBSRC = lib/src
@@ -32,6 +39,14 @@ dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 
 dev-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
+
+build: CFLAGS := $(RELEASE_CFLAGS)
+build: LDFLAGS := $(RELEASE_LDFLAGS)
+build: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
+
+build-gui: CFLAGS := $(RELEASE_CFLAGS)
+build-gui: LDFLAGS := $(RELEASE_LDFLAGS)
+build-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
@@ -97,4 +112,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev dev-gui clean check-deps check-gui-deps lint test
+.PHONY: dev dev-gui build build-gui clean check-deps check-gui-deps lint test

@@ -1,148 +1,56 @@
-<svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 128 128"
-    width="128"
-    height="128"
->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <linearGradient
-            id="chassis-grad"
-            x1="64"
-            y1="20"
-            x2="64"
-            y2="108"
-            gradientUnits="userSpaceOnUse"
-        >
+    <linearGradient id="chassis-grad" x1="64" y1="20" x2="64" y2="108" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#3d3846" />
       <stop offset="100%" stop-color="#241f31" />
     </linearGradient>
-    <linearGradient
-            id="upload-grad"
-            x1="16"
-            y1="44"
-            x2="112"
-            y2="44"
-            gradientUnits="userSpaceOnUse"
-        >
+    <linearGradient id="upload-grad" x1="16" y1="44" x2="112" y2="44" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#62a0ea" />
       <stop offset="45%" stop-color="#3584e4" />
       <stop offset="45.1%" stop-color="#5c1924" />
       <stop offset="100%" stop-color="#3a1118" />
     </linearGradient>
-
-    <linearGradient
-            id="download-grad"
-            x1="16"
-            y1="68"
-            x2="112"
-            y2="68"
-            gradientUnits="userSpaceOnUse"
-        >
+    <linearGradient id="download-grad" x1="16" y1="68" x2="112" y2="68" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#57e389" />
       <stop offset="70%" stop-color="#2ec27e" />
       <stop offset="70.1%" stop-color="#5c1924" />
       <stop offset="100%" stop-color="#3a1118" />
     </linearGradient>
-
     <linearGradient id="gate-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#f6f5f4" />
       <stop offset="30%" stop-color="#cdc7c2" />
       <stop offset="100%" stop-color="#9a9996" />
     </linearGradient>
-
     <linearGradient id="accent-grad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#ff7849" />
       <stop offset="100%" stop-color="#e66100" />
     </linearGradient>
   </defs>
 
-  <rect
-        x="16"
-        y="24"
-        width="96"
-        height="86"
-        rx="12"
-        fill="#100d15"
-        opacity="0.5"
-    />
-  <rect
-        x="18"
-        y="22"
-        width="92"
-        height="86"
-        rx="12"
-        fill="#1c1824"
-        opacity="0.4"
-    />
-
-  <rect
-        x="16"
-        y="20"
-        width="96"
-        height="88"
-        rx="12"
-        fill="url(#chassis-grad)"
-    />
-
-  <rect
-        x="16.5"
-        y="20.5"
-        width="95"
-        height="87"
-        rx="11.5"
-        fill="none"
-        stroke="#5d5b66"
-        stroke-width="1"
-        opacity="0.5"
-    />
-  <path
-        d="M 28 21 L 100 21"
-        stroke="#ffffff"
-        stroke-width="1"
-        stroke-linecap="round"
-        opacity="0.3"
-    />
+  <rect x="16" y="24" width="96" height="86" rx="12" fill="#100d15" opacity="0.5" />
+  <rect x="18" y="22" width="92" height="86" rx="12" fill="#1c1824" opacity="0.4" />
+  <rect x="16" y="20" width="96" height="88" rx="12" fill="url(#chassis-grad)" />
+  <rect x="16.5" y="20.5" width="95" height="87" rx="11.5" fill="none" stroke="#5d5b66" stroke-width="1" opacity="0.5" />
+  <path d="M 28 21 L 100 21" stroke="#ffffff" stroke-width="1" stroke-linecap="round" opacity="0.3" />
 
   <rect x="24" y="40" width="80" height="12" rx="4" fill="#1a1625" />
   <rect x="26" y="42" width="76" height="8" rx="2" fill="url(#upload-grad)" />
-
   <rect x="24" y="64" width="80" height="12" rx="4" fill="#1a1625" />
   <rect x="26" y="66" width="76" height="8" rx="2" fill="url(#download-grad)" />
 
-  <rect
-        x="61"
-        y="27"
-        width="14"
-        height="32"
-        rx="2"
-        fill="#100d15"
-        opacity="0.4"
-    />
+  <rect x="61" y="27" width="14" height="32" rx="2" fill="#100d15" opacity="0.4" />
   <rect x="58" y="24" width="14" height="32" rx="2" fill="url(#gate-grad)" />
   <path d="M 59 25 L 71 25" stroke="#ffffff" stroke-width="1" opacity="0.6" />
   <rect x="62" y="28" width="6" height="20" rx="1" fill="url(#accent-grad)" />
   <circle cx="65" cy="32" r="2" fill="#474747" />
 
-  <rect
-        x="81"
-        y="63"
-        width="14"
-        height="32"
-        rx="2"
-        fill="#100d15"
-        opacity="0.4"
-    />
+  <rect x="81" y="63" width="14" height="32" rx="2" fill="#100d15" opacity="0.4" />
   <rect x="78" y="60" width="14" height="32" rx="2" fill="url(#gate-grad)" />
   <path d="M 79 61 L 91 61" stroke="#ffffff" stroke-width="1" opacity="0.6" />
   <rect x="82" y="64" width="6" height="20" rx="1" fill="url(#accent-grad)" />
   <circle cx="85" cy="80" r="2" fill="#474747" />
 
-  <path
-        d="M 36 84 L 36 88 M 46 84 L 46 88 M 56 84 L 56 88 M 66 84 L 66 88 M 76 84 L 76 88 M 86 84"
-        stroke="#4f4a58"
-        stroke-width="1"
-        stroke-linecap="round"
-    />
+  <path d="M 36 84 L 36 88 M 46 84 L 46 88 M 56 84 L 56 88 M 66 84 L 66 88 M 76 84 L 76 88 M 86 84" stroke="#4f4a58" stroke-width="1" stroke-linecap="round" />
 
   <circle cx="28" cy="98" r="1.5" fill="#2ec27e" />
   <circle cx="34" cy="98" r="1.5" fill="#3584e4" />
