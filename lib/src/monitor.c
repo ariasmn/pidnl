@@ -158,10 +158,20 @@ static void monitor_run(void) {
     }
 
     // Signal parent that socket is ready
+    // TODO: revisit the socket I/O in this file. The raw read()/write() calls
+    // assume each transfers a whole message and bail on anything shorter, but
+    // they don't handle EINTR or partial transfers. Add write_all/read_all
+    // helpers and use them on both ends. Also: the monitor should log these
+    // errors instead of silently ignoring them.
     if (notify_parent_fd >= 0) {
-        write(notify_parent_fd, "1", 1);
+        ssize_t notified = write(notify_parent_fd, "1", 1);
         close(notify_parent_fd);
         notify_parent_fd = -1;
+        if (notified != 1) {
+            close(monitor_socket);
+            unlink(MONITOR_SOCKET_PATH);
+            exit(1);
+        }
     }
 
     signal(SIGTERM, SIG_DFL);
@@ -225,7 +235,11 @@ static void monitor_run(void) {
                 running = 0;
             }
 
-            write(client_fd, &result, sizeof(result));
+            // The command has already been applied, so if the
+            // client disconnected there is nothing to recover. Assigning the
+            // result satisfies write()'s warn_unused_result; close cleans up.
+            ssize_t acked = write(client_fd, &result, sizeof(result));
+            (void)acked;
             close(client_fd);
         }
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=pidnl
+GenericName=Network Limiter
+Comment=Limit network bandwidth per process
+Icon=io.github.ariasmn.pidnl
+Exec=pidnl-gui
+Terminal=false
+Categories=System;Monitor;
+Keywords=bandwidth;network;limit;throttle;rate;traffic;monitor;
+StartupNotify=true
