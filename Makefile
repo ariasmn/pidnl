@@ -26,8 +26,6 @@ check-deps:
 	@which clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
 	@which bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libasan.so || (echo "libasan: MISSING" && exit 1)
-	@ldconfig -p 2>/dev/null | grep -q libnl-3.so || (echo "libnl-3: MISSING" && exit 1)
-	@ldconfig -p 2>/dev/null | grep -q libnl-route-3.so || (echo "libnl-route-3: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
 
@@ -48,6 +46,18 @@ build-gui: CFLAGS := $(RELEASE_CFLAGS)
 build-gui: LDFLAGS := $(RELEASE_LDFLAGS)
 build-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 
+DIST_DIR = dist
+NFPM := $(shell command -v nfpm 2>/dev/null || echo $(shell go env GOPATH 2>/dev/null)/bin/nfpm)
+release: CFLAGS := $(RELEASE_CFLAGS)
+release: LDFLAGS := $(RELEASE_LDFLAGS)
+release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
+	@command -v $(NFPM) >/dev/null 2>&1 || { echo "nfpm not found; install with: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"; exit 1; }
+	@mkdir -p $(DIST_DIR)
+	@for cfg in packaging/nfpm-cli.yaml packaging/nfpm-gui.yaml; do \
+		$(NFPM) package --config $$cfg --packager rpm --target $(DIST_DIR)/; \
+		$(NFPM) package --config $$cfg --packager deb --target $(DIST_DIR)/; \
+	done
+
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
 
@@ -55,7 +65,7 @@ $(BPF_OBJ): $(BPF_SRC)
 	@$(CC) -O2 -target bpf -g -I$(ARCH_INCLUDE) -c $< -o $@
 
 $(CLI_BIN): $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o $(CLI_OBJ)
-	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lnl-3 -lnl-route-3 -lbpf -lelf -lcgroup
+	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -L/usr/lib64 -lbpf -lelf -lcgroup
 
 $(GUI_BIN): $(GUI_OBJ) $(LIBSRC)/discovery.o $(LIBSRC)/ratelimit.o $(LIBSRC)/monitor.o | $(BPF_SKEL)
 	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(GUI_LDFLAGS) -lbpf -lelf -lcgroup
@@ -112,4 +122,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev dev-gui build build-gui clean check-deps check-gui-deps lint test
+.PHONY: dev dev-gui build build-gui release clean check-deps check-gui-deps lint test

@@ -1,0 +1,59 @@
+name: pidnl-gui
+version: "0.1.0"
+arch: amd64
+platform: linux
+
+maintainer: "Ismael Arias <ismaelariasmn@gmail.com>"
+vendor: "pidnl"
+homepage: "https://github.com/ariasmn/pidnl"
+license: "GPL-3.0-or-later"
+section: net
+priority: optional
+
+description: |
+  Limit network bandwidth per process (graphical interface).
+  pidnl sets per-process network bandwidth rate limits: pick a running
+  application and cap how much of your connection it is allowed to use.
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+  postremove: ./packaging/postremove.sh
+
+contents:
+  - src: ./gui/pidnl-gui
+    dst: /usr/bin/pidnl-gui
+  - src: ./data/io.github.ariasmn.pidnl.policy
+    dst: /usr/share/polkit-1/actions/io.github.ariasmn.pidnl.policy
+  - src: ./data/io.github.ariasmn.pidnl.desktop
+    dst: /usr/share/applications/io.github.ariasmn.pidnl.desktop
+  - src: ./data/io.github.ariasmn.pidnl.metainfo.xml
+    dst: /usr/share/metainfo/io.github.ariasmn.pidnl.metainfo.xml
+  - src: ./data/io.github.ariasmn.pidnl.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/io.github.ariasmn.pidnl.svg
+  - src: ./LICENSE
+    dst: /usr/share/licenses/pidnl-gui/LICENSE
+    packager: rpm
+  - src: ./LICENSE
+    dst: /usr/share/doc/pidnl-gui/copyright
+    packager: deb
+
+rpm:
+  summary: Limit network bandwidth per process (GUI)
+
+overrides:
+  rpm:
+    depends:
+      - gtk4
+      - libadwaita
+      - glib2
+      - libbpf
+      - elfutils-libelf
+      - libcgroup
+  deb:
+    depends:
+      - libgtk-4-1
+      - libadwaita-1-0
+      - libglib2.0-0
+      - libbpf1
+      - libelf1
+      - libcgroup1
