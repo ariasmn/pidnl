@@ -23,11 +23,13 @@ GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 
 check-deps:
-	@which clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
-	@which bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
+	@command -v clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
+	@command -v bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
+	@command -v pkg-config >/dev/null 2>&1 || (echo "pkg-config: MISSING" && exit 1)
 	@ldconfig -p 2>/dev/null | grep -q libasan.so || (echo "libasan: MISSING" && exit 1)
-	@ldconfig -p 2>/dev/null | grep -q libbpf.so || (echo "libbpf: MISSING" && exit 1)
-	@ldconfig -p 2>/dev/null | grep -q libelf.so || (echo "libelf: MISSING" && exit 1)
+	@pkg-config --exists libbpf 2>/dev/null || (echo "libbpf: MISSING" && exit 1)
+	@pkg-config --exists libelf 2>/dev/null || (echo "libelf: MISSING" && exit 1)
+	@pkg-config --exists libcgroup 2>/dev/null || (echo "libcgroup: MISSING" && exit 1)
 
 check-gui-deps:
 	@pkg-config --exists gtk4 2>/dev/null || (echo "gtk4: MISSING" && exit 1)

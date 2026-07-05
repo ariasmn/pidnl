@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <component type="desktop-application">
   <id>io.github.ariasmn.pidnl</id>
-
-  <!-- License of THIS metadata file, not the project. -->
   <metadata_license>CC0-1.0</metadata_license>
-  <!-- TODO: confirm the project license and add a matching LICENSE file at the
-       repo root. This is a placeholder; the value must be a valid SPDX id. -->
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>pidnl</name>
