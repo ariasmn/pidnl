@@ -34,6 +34,9 @@ contents:
     dst: /usr/share/licenses/pidnl-gui/LICENSE
     packager: rpm
   - src: ./LICENSE
+    dst: /usr/share/licenses/pidnl-gui/LICENSE
+    packager: archlinux
+  - src: ./LICENSE
     dst: /usr/share/doc/pidnl-gui/copyright
     packager: deb
 
@@ -57,3 +60,11 @@ overrides:
       - libbpf1
       - libelf1
       - libcgroup3
+  archlinux:
+    depends:
+      - gtk4
+      - libadwaita
+      - glib2
+      - libbpf
+      - elfutils
+      - libcgroup

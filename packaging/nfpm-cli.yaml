@@ -21,6 +21,9 @@ contents:
     dst: /usr/share/licenses/pidnl/LICENSE
     packager: rpm
   - src: ./LICENSE
+    dst: /usr/share/licenses/pidnl/LICENSE
+    packager: archlinux
+  - src: ./LICENSE
     dst: /usr/share/doc/pidnl/copyright
     packager: deb
 
@@ -38,3 +41,8 @@ overrides:
       - libbpf1
       - libelf1
       - libcgroup3
+  archlinux:
+    depends:
+      - libbpf
+      - elfutils
+      - libcgroup

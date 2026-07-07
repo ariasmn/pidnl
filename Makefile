@@ -55,7 +55,7 @@ build-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 
 DIST_DIR = dist
 NFPM := $(shell command -v nfpm 2>/dev/null || echo $(shell go env GOPATH 2>/dev/null)/bin/nfpm)
-# Which nfpm packager to invoke; set PACKAGER=rpm or PACKAGER=deb.
+# Which nfpm packager to invoke; set PACKAGER=rpm, deb, or archlinux.
 # Defaults to both for a native "make release" (built on the host distro).
 PACKAGER ?= rpm deb
 
@@ -72,7 +72,6 @@ release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
 
 # Build the RPM inside a Fedora container.
 RPM_IMAGE := fedora:44
-DEB_IMAGE  := debian:13
 
 container-rpm:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
@@ -86,6 +85,8 @@ container-rpm:
 		make release PACKAGER=rpm'
 
 # Build the DEB inside a Debian 13 container.
+DEB_IMAGE  := debian:13
+
 container-deb:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
 	$(CONTAINER_CMD) run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(DEB_IMAGE) \
@@ -97,6 +98,30 @@ container-deb:
 		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
 		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
 		make release PACKAGER=deb'
+
+# Build the Arch Linux package inside an Arch container.
+ARCH_IMAGE := archlinux:latest
+
+container-arch:
+	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
+	$(CONTAINER_CMD) run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(ARCH_IMAGE) \
+		bash -c 'set -e; \
+			pacman-key --init >/dev/null 2>&1 || true; \
+			pacman-key --populate archlinux >/dev/null 2>&1 || true; \
+			pacman -Sy --noconfirm base-devel clang bpf make libbpf elfutils \
+				gtk4 libadwaita go >/dev/null; \
+			cd /tmp; \
+			curl -fsSL -o libcgroup.tar.gz https://github.com/libcgroup/libcgroup/releases/download/v3.2.0/libcgroup-3.2.0.tar.gz; \
+			tar -xzf libcgroup.tar.gz; \
+			cd libcgroup-3.2.0; \
+			./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --sbindir=/usr/bin --enable-opaque-hierarchy=name=systemd >/dev/null; \
+			make -j$$(nproc) >/dev/null; \
+			make install >/dev/null; \
+			ldconfig; \
+			cd /workspace; \
+		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+		make release PACKAGER=archlinux'
 
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
@@ -161,4 +186,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev dev-gui build build-gui release container-rpm container-deb clean check-deps check-dev-deps check-gui-deps lint test
+.PHONY: dev dev-gui build build-gui release container-rpm container-deb container-arch clean check-deps check-dev-deps check-gui-deps lint test
