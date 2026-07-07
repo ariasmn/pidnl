@@ -22,22 +22,27 @@ GUI_BIN = gui/pidnl-gui
 GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 
+# Container engine used by container-rpm / container-deb / test targets.
+CONTAINER_CMD := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo "")
+
 check-deps:
 	@command -v clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
 	@command -v bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
 	@command -v pkg-config >/dev/null 2>&1 || (echo "pkg-config: MISSING" && exit 1)
-	@ldconfig -p 2>/dev/null | grep -q libasan.so || (echo "libasan: MISSING" && exit 1)
 	@pkg-config --exists libbpf 2>/dev/null || (echo "libbpf: MISSING" && exit 1)
 	@pkg-config --exists libelf 2>/dev/null || (echo "libelf: MISSING" && exit 1)
 	@pkg-config --exists libcgroup 2>/dev/null || (echo "libcgroup: MISSING" && exit 1)
+
+check-dev-deps: check-deps
+	@ldconfig -p 2>/dev/null | grep -q libasan.so || (echo "libasan: MISSING" && exit 1)
 
 check-gui-deps:
 	@pkg-config --exists gtk4 2>/dev/null || (echo "gtk4: MISSING" && exit 1)
 	@pkg-config --exists libadwaita-1 2>/dev/null || (echo "libadwaita-1: MISSING" && exit 1)
 
-dev: clean check-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
+dev: clean check-dev-deps $(BPF_SKEL) $(BPF_OBJ) $(CLI_BIN)
 
-dev-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
+dev-gui: clean check-dev-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 	@G_SLICE=always-malloc LSAN_OPTIONS=suppressions=gui/lsan.supp $(GUI_BIN)
 
 build: CFLAGS := $(RELEASE_CFLAGS)
@@ -50,15 +55,48 @@ build-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 
 DIST_DIR = dist
 NFPM := $(shell command -v nfpm 2>/dev/null || echo $(shell go env GOPATH 2>/dev/null)/bin/nfpm)
+# Which nfpm packager to invoke; set PACKAGER=rpm or PACKAGER=deb.
+# Defaults to both for a native "make release" (built on the host distro).
+PACKAGER ?= rpm deb
+
 release: CFLAGS := $(RELEASE_CFLAGS)
 release: LDFLAGS := $(RELEASE_LDFLAGS)
 release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
 	@command -v $(NFPM) >/dev/null 2>&1 || { echo "nfpm not found; install with: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest"; exit 1; }
 	@mkdir -p $(DIST_DIR)
 	@for cfg in packaging/nfpm-cli.yaml packaging/nfpm-gui.yaml; do \
-		$(NFPM) package --config $$cfg --packager rpm --target $(DIST_DIR)/; \
-		$(NFPM) package --config $$cfg --packager deb --target $(DIST_DIR)/; \
+		for p in $(PACKAGER); do \
+			$(NFPM) package --config $$cfg --packager $$p --target $(DIST_DIR)/; \
+		done; \
 	done
+
+# Build the RPM inside a Fedora container.
+RPM_IMAGE := fedora:44
+DEB_IMAGE  := debian:13
+
+container-rpm:
+	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
+	$(CONTAINER_CMD) run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(RPM_IMAGE) \
+		bash -c 'set -e; \
+			dnf install -y --setopt=install_weak_deps=False clang bpftool make \
+				libbpf-devel elfutils-libelf-devel gtk4-devel libadwaita-devel \
+				libcgroup-devel golang >/dev/null; \
+		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+		make release PACKAGER=rpm'
+
+# Build the DEB inside a Debian 13 container.
+container-deb:
+	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
+	$(CONTAINER_CMD) run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(DEB_IMAGE) \
+		bash -c 'set -e; \
+			export DEBIAN_FRONTEND=noninteractive; \
+			apt-get update >/dev/null; \
+			apt-get install -y clang bpftool make libbpf-dev libelf-dev \
+				libcgroup-dev libgtk-4-dev libadwaita-1-dev golang-go >/dev/null; \
+		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+		make release PACKAGER=deb'
 
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
@@ -89,7 +127,6 @@ clean:
 lint:
 	@clang-format --dry-run --Werror cli/*.c gui/*.c lib/src/*.c
 
-CONTAINER_CMD := $(shell which docker 2>/dev/null || which podman 2>/dev/null || echo "")
 CONTAINER_IMAGE := ubuntu:26.04
 
 test:
@@ -124,4 +161,4 @@ test:
 			bash tests/run.sh \
 		'
 
-.PHONY: dev dev-gui build build-gui release clean check-deps check-gui-deps lint test
+.PHONY: dev dev-gui build build-gui release container-rpm container-deb clean check-deps check-dev-deps check-gui-deps lint test

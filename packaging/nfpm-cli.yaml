@@ -30,11 +30,11 @@ rpm:
 overrides:
   rpm:
     depends:
-      - libbpf
-      - elfutils-libelf
-      - libcgroup
+      - "libbpf.so.1()(64bit)"
+      - "libelf.so.1()(64bit)"
+      - "libcgroup.so.3()(64bit)"
   deb:
     depends:
       - libbpf1
       - libelf1
-      - libcgroup1
+      - libcgroup3

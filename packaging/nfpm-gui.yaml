@@ -43,12 +43,12 @@ rpm:
 overrides:
   rpm:
     depends:
-      - gtk4
-      - libadwaita
-      - glib2
-      - libbpf
-      - elfutils-libelf
-      - libcgroup
+      - "libgtk-4.so.1()(64bit)"
+      - "libadwaita-1.so.0()(64bit)"
+      - "libglib-2.0.so.0()(64bit)"
+      - "libbpf.so.1()(64bit)"
+      - "libelf.so.1()(64bit)"
+      - "libcgroup.so.3()(64bit)"
   deb:
     depends:
       - libgtk-4-1
@@ -56,4 +56,4 @@ overrides:
       - libglib2.0-0
       - libbpf1
       - libelf1
-      - libcgroup1
+      - libcgroup3
