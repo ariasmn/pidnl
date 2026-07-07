@@ -16,8 +16,8 @@ description: |
   application and cap how much of your connection it is allowed to use.
 
 scripts:
-  postinstall: ./packaging/postinstall.sh
-  postremove: ./packaging/postremove.sh
+  postinstall: ./packaging/postupdate.sh
+  postremove: ./packaging/postupdate.sh
 
 contents:
   - src: ./gui/pidnl-gui
