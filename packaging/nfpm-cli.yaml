@@ -1,5 +1,5 @@
 name: pidnl
-version: "0.1.0"
+version: "${PIDNL_VERSION}"
 arch: amd64
 platform: linux
 

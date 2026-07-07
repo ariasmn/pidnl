@@ -1,13 +1,6 @@
 CC = clang
 CFLAGS = -Wall -Wextra -Werror -g -fsanitize=address -fno-omit-frame-pointer
 LDFLAGS = -fsanitize=address
-RELEASE_CFLAGS = -O2 -Wall -Wextra \
-	-D_FORTIFY_SOURCE=2 \
-	-fstack-protector-strong \
-	-fstack-clash-protection \
-	-fcf-protection=full \
-	-fPIE
-RELEASE_LDFLAGS = -pie -s -Wl,-z,relro,-z,now -Wl,-z,noexecstack
 ARCH_INCLUDE = /usr/include/$(shell $(CC) -print-multiarch 2>/dev/null || echo "$(shell uname -m)-linux-gnu")
 
 LIBSRC = lib/src
@@ -22,9 +15,27 @@ GUI_BIN = gui/pidnl-gui
 GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 
-# Container engine used by container-rpm / container-deb / test targets.
 CONTAINER_CMD := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo "")
+TEST_IMAGE := ubuntu:26.04
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+PACKAGER ?= rpm deb
+NFPM := $(shell command -v nfpm 2>/dev/null || echo $(shell go env GOPATH 2>/dev/null)/bin/nfpm)
+DIST_DIR = dist
+
+RPM_IMAGE  := fedora:44
+DEB_IMAGE  := debian:13
+ARCH_IMAGE := archlinux:latest
+
+RELEASE_CFLAGS = -O2 -Wall -Wextra \
+	-D_FORTIFY_SOURCE=2 \
+	-fstack-protector-strong \
+	-fstack-clash-protection \
+	-fcf-protection=full \
+	-fPIE
+RELEASE_LDFLAGS = -pie -s -Wl,-z,relro,-z,now -Wl,-z,noexecstack
+
+# Development targets
 check-deps:
 	@command -v clang >/dev/null 2>&1 || (echo "clang: MISSING" && exit 1)
 	@command -v bpftool >/dev/null 2>&1 || (echo "bpftool: MISSING" && exit 1)
@@ -53,12 +64,10 @@ build-gui: CFLAGS := $(RELEASE_CFLAGS)
 build-gui: LDFLAGS := $(RELEASE_LDFLAGS)
 build-gui: clean check-deps check-gui-deps $(BPF_SKEL) $(GUI_BIN)
 
-DIST_DIR = dist
-NFPM := $(shell command -v nfpm 2>/dev/null || echo $(shell go env GOPATH 2>/dev/null)/bin/nfpm)
-# Which nfpm packager to invoke; set PACKAGER=rpm, deb, or archlinux.
-# Defaults to both for a native "make release" (built on the host distro).
-PACKAGER ?= rpm deb
+lint:
+	@clang-format --dry-run --Werror cli/*.c gui/*.c lib/src/*.c
 
+# Release targets
 release: CFLAGS := $(RELEASE_CFLAGS)
 release: LDFLAGS := $(RELEASE_LDFLAGS)
 release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
@@ -66,12 +75,13 @@ release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
 	@mkdir -p $(DIST_DIR)
 	@for cfg in packaging/nfpm-cli.yaml packaging/nfpm-gui.yaml; do \
 		for p in $(PACKAGER); do \
-			$(NFPM) package --config $$cfg --packager $$p --target $(DIST_DIR)/; \
+			case "$$p" in \
+				archlinux) v="$$(echo '$(VERSION)' | sed 's/-/./g')" ;; \
+				*) v="$(VERSION)" ;; \
+			esac; \
+			PIDNL_VERSION="$$v" $(NFPM) package --config $$cfg --packager $$p --target $(DIST_DIR)/; \
 		done; \
 	done
-
-# Build the RPM inside a Fedora container.
-RPM_IMAGE := fedora:44
 
 container-rpm:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
@@ -80,12 +90,9 @@ container-rpm:
 			dnf install -y --setopt=install_weak_deps=False clang bpftool make \
 				libbpf-devel elfutils-libelf-devel gtk4-devel libadwaita-devel \
 				libcgroup-devel golang >/dev/null; \
-		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
-		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
-		make release PACKAGER=rpm'
-
-# Build the DEB inside a Debian 13 container.
-DEB_IMAGE  := debian:13
+			export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+			command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+			make release PACKAGER=rpm VERSION="$(VERSION)"'
 
 container-deb:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
@@ -95,12 +102,9 @@ container-deb:
 			apt-get update >/dev/null; \
 			apt-get install -y clang bpftool make libbpf-dev libelf-dev \
 				libcgroup-dev libgtk-4-dev libadwaita-1-dev golang-go >/dev/null; \
-		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
-		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
-		make release PACKAGER=deb'
-
-# Build the Arch Linux package inside an Arch container.
-ARCH_IMAGE := archlinux:latest
+			export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+			command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+			make release PACKAGER=deb VERSION="$(VERSION)"'
 
 container-arch:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
@@ -119,10 +123,48 @@ container-arch:
 			make install >/dev/null; \
 			ldconfig; \
 			cd /workspace; \
-		export PATH="$$PATH:$$(go env GOPATH)/bin"; \
-		command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
-		make release PACKAGER=archlinux'
+			export PATH="$$PATH:$$(go env GOPATH)/bin"; \
+			command -v nfpm >/dev/null 2>&1 || go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest; \
+			make release PACKAGER=archlinux VERSION="$(VERSION)"'
 
+# Test target
+test:
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: tests must be run as root (try: sudo make test)"; \
+		exit 1; \
+	fi
+	@if [ -z "$(CONTAINER_CMD)" ]; then \
+		echo "error: docker or podman is required to run tests"; \
+		exit 1; \
+	fi
+	@echo "Running tests in $(TEST_IMAGE) via $(CONTAINER_CMD)..."
+	@$(CONTAINER_CMD) run --privileged --cgroupns=host --rm \
+		-v "$(CURDIR):/workspace" \
+		-w /workspace \
+		$(TEST_IMAGE) \
+		bash -c ' \
+			set -e; \
+			export DEBIAN_FRONTEND=noninteractive; \
+			apt-get update >/dev/null 2>&1; \
+			apt-get install -y \
+				clang \
+				bpftool \
+				libbpf-dev \
+				libnl-3-dev \
+				libnl-route-3-dev \
+				libelf-dev \
+				libcgroup-dev \
+				netcat-openbsd \
+				make >/dev/null 2>&1; \
+			make dev; \
+			bash tests/run.sh \
+		'
+
+# Cleanup
+clean:
+	@rm -f $(LIBSRC)/*.o cli/*.o gui/*.o $(CLI_BIN) $(GUI_BIN) $(BPF_OBJ) $(BPF_SKEL) 2>/dev/null
+
+# Build rules
 $(BPF_SKEL): $(BPF_OBJ)
 	@bpftool gen skeleton $< > $@
 
@@ -145,45 +187,5 @@ cli/%.o: cli/%.c
 
 gui/%.o: gui/%.c
 	@$(CC) $(CFLAGS) $(GUI_CFLAGS) -I$(LIBSRC) -c $< -o $@
-
-clean:
-	@rm -f $(LIBSRC)/*.o cli/*.o gui/*.o $(CLI_BIN) $(GUI_BIN) $(BPF_OBJ) $(BPF_SKEL) 2>/dev/null
-
-lint:
-	@clang-format --dry-run --Werror cli/*.c gui/*.c lib/src/*.c
-
-CONTAINER_IMAGE := ubuntu:26.04
-
-test:
-	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: tests must be run as root (try: sudo make test)"; \
-		exit 1; \
-	fi
-	@if [ -z "$(CONTAINER_CMD)" ]; then \
-		echo "error: docker or podman is required to run tests"; \
-		exit 1; \
-	fi
-	@echo "Running tests in $(CONTAINER_IMAGE) via $(CONTAINER_CMD)..."
-	@$(CONTAINER_CMD) run --privileged --cgroupns=host --rm \
-		-v "$(CURDIR):/workspace" \
-		-w /workspace \
-		$(CONTAINER_IMAGE) \
-		bash -c ' \
-			set -e; \
-			export DEBIAN_FRONTEND=noninteractive; \
-			apt-get update >/dev/null 2>&1; \
-			apt-get install -y \
-				clang \
-				bpftool \
-				libbpf-dev \
-				libnl-3-dev \
-				libnl-route-3-dev \
-				libelf-dev \
-				libcgroup-dev \
-				netcat-openbsd \
-				make >/dev/null 2>&1; \
-			make dev; \
-			bash tests/run.sh \
-		'
 
 .PHONY: dev dev-gui build build-gui release container-rpm container-deb container-arch clean check-deps check-dev-deps check-gui-deps lint test
