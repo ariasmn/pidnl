@@ -101,6 +101,7 @@ test:
 			apt-get install -y \
 				clang \
 				bpftool \
+				pkg-config \
 				libbpf-dev \
 				libnl-3-dev \
 				libnl-route-3-dev \
