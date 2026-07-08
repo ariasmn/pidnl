@@ -15,7 +15,7 @@ GUI_BIN = gui/pidnl-gui
 GUI_CFLAGS := $(shell pkg-config --cflags gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 GUI_LDFLAGS := $(shell pkg-config --libs gtk4 libadwaita-1 gio-unix-2.0 2>/dev/null)
 
-CONTAINER_CMD := $(shell which podman 2>/dev/null || which docker 2>/dev/null || echo "")
+CONTAINER_CMD ?= $(shell which docker 2>/dev/null || which podman 2>/dev/null || echo "")
 TEST_IMAGE := ubuntu:26.04
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
