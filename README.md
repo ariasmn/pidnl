@@ -15,6 +15,8 @@
     ·
     <a href="#installation">Installation</a>
     ·
+    <a href="#usage">Usage</a>
+    ·
     <a href="#how-it-works">How it works</a>
   </p>
 </p>
@@ -113,6 +115,43 @@ make build-gui
 
 The `build` and `build-gui` recipes check for the required build dependencies before
 starting, so as long as everything is installed the compile should succeed.
+
+## Usage
+
+### Graphical interface
+
+Launch `pidnl-gui` from your application menu or run it from the terminal. The
+interface is straightforward: pick a process, set the upload and download
+limits, and the limit is applied immediately.
+
+<p align="center">
+  <img src="data/screenshots/preview.png" alt="pidnl GUI preview showing dark and light themes" width="800">
+</p>
+
+### Command-line interface
+
+The CLI has three commands:
+
+```bash
+# List processes with network connections
+sudo pidnl list
+
+# Apply a bandwidth limit to a process (rates are in kbps)
+sudo pidnl limit set <pid> <upload_kbps> <download_kbps>
+
+# Remove a bandwidth limit
+sudo pidnl limit unset <pid>
+
+# Remove all pidnl rate limits
+sudo pidnl clean --yes
+```
+
+Use `-1` to leave a direction unlimited. For example, to limit only download
+traffic to 2 Mbps:
+
+```bash
+sudo pidnl limit set 12345 -1 2000
+```
 
 ## How it works
 
