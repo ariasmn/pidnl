@@ -6,3 +6,6 @@
 cli/pidnl
 gui/pidnl-gui
 lib/tests/test_discovery
+
+# packaging output
+dist/

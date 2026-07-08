@@ -1,0 +1,48 @@
+name: pidnl
+version: "${PIDNL_VERSION}"
+arch: amd64
+platform: linux
+
+maintainer: "Ismael Arias <ismaelariasmn@gmail.com>"
+vendor: "pidnl"
+homepage: "https://github.com/ariasmn/pidnl"
+license: "GPL-3.0-or-later"
+section: net
+priority: optional
+
+description: |
+  Limit network bandwidth per process (command-line interface).
+  pidnl sets per-process network bandwidth rate limits from the terminal.
+
+contents:
+  - src: ./cli/pidnl
+    dst: /usr/bin/pidnl
+  - src: ./LICENSE
+    dst: /usr/share/licenses/pidnl/LICENSE
+    packager: rpm
+  - src: ./LICENSE
+    dst: /usr/share/licenses/pidnl/LICENSE
+    packager: archlinux
+  - src: ./LICENSE
+    dst: /usr/share/doc/pidnl/copyright
+    packager: deb
+
+rpm:
+  summary: Limit network bandwidth per process (CLI)
+
+overrides:
+  rpm:
+    depends:
+      - "libbpf.so.1()(64bit)"
+      - "libelf.so.1()(64bit)"
+      - "libcgroup.so.3()(64bit)"
+  deb:
+    depends:
+      - libbpf1
+      - libelf1
+      - libcgroup3
+  archlinux:
+    depends:
+      - libbpf
+      - elfutils
+      - libcgroup
