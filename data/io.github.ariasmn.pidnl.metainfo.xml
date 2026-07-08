@@ -5,16 +5,16 @@
   <project_license>GPL-3.0-or-later</project_license>
 
   <name>pidnl</name>
-  <summary>Limit network bandwidth per process</summary>
+  <summary>Strict per-process bandwidth limits</summary>
 
   <description>
     <p>
-      pidnl sets per-process network bandwidth rate limits. Pick a running
-      application and cap how much of your connection it is allowed to use.
+      pidnl applies strict upload and download bandwidth limits to individual
+      running applications through traffic policing.
     </p>
     <p>Features:</p>
     <ul>
-      <li>Per-process upload and download rate limits</li>
+      <li>Per-process upload and download bandwidth limits</li>
       <li>Limits are removed automatically when a process exits</li>
     </ul>
   </description>
@@ -35,7 +35,6 @@
     <keyword>bandwidth</keyword>
     <keyword>network</keyword>
     <keyword>limit</keyword>
-    <keyword>throttle</keyword>
     <keyword>rate</keyword>
     <keyword>traffic</keyword>
   </keywords>

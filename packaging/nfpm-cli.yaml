@@ -11,8 +11,9 @@ section: net
 priority: optional
 
 description: |
-  Limit network bandwidth per process (command-line interface).
-  pidnl sets per-process network bandwidth rate limits from the terminal.
+  Strict per-process bandwidth limits (command-line interface).
+  pidnl applies strict upload and download bandwidth limits to individual
+  processes from the terminal using traffic policing.
 
 contents:
   - src: ./cli/pidnl
@@ -28,7 +29,7 @@ contents:
     packager: deb
 
 rpm:
-  summary: Limit network bandwidth per process (CLI)
+  summary: Strict per-process bandwidth limits (CLI)
 
 overrides:
   rpm:
