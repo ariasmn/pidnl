@@ -66,7 +66,7 @@ Download the `.deb` package and install it with `apt`:
 sudo apt install ./pidnl_*.deb
 ```
 
-### Fedora 44+
+### Fedora 44+, openSUSE Tumbleweed
 
 Download the `.rpm` package and install it with `dnf`:
 
