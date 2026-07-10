@@ -82,6 +82,18 @@ release: clean check-deps check-gui-deps $(BPF_SKEL) $(CLI_BIN) $(GUI_BIN)
 			PIDNL_VERSION="$$v" $(NFPM) package --config $$cfg --packager $$p --target $(DIST_DIR)/; \
 		done; \
 	done
+	@$(MAKE) release-checksums
+
+release-checksums:
+	@rm -f $(DIST_DIR)/SHA256SUMS
+	@cd $(DIST_DIR) && find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -exec sha256sum {} + > SHA256SUMS
+	@echo "Checksums written to $(DIST_DIR)/SHA256SUMS"
+
+release-all:
+	@$(MAKE) container-rpm VERSION="$(VERSION)"
+	@$(MAKE) container-deb VERSION="$(VERSION)"
+	@$(MAKE) container-arch VERSION="$(VERSION)"
+	@$(MAKE) release-checksums
 
 container-rpm:
 	@if [ -z "$(CONTAINER_CMD)" ]; then echo "error: podman or docker required"; exit 1; fi
@@ -189,4 +201,4 @@ cli/%.o: cli/%.c
 gui/%.o: gui/%.c
 	@$(CC) $(CFLAGS) $(GUI_CFLAGS) -I$(LIBSRC) -c $< -o $@
 
-.PHONY: dev dev-gui build build-gui release container-rpm container-deb container-arch clean check-deps check-dev-deps check-gui-deps lint test
+.PHONY: dev dev-gui build build-gui release release-checksums release-all container-rpm container-deb container-arch clean check-deps check-dev-deps check-gui-deps lint test
