@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libcgroup.h>
+#include <limits.h>
 #include <linux/limits.h>
 #include <linux/magic.h>
 #include <stdio.h>
@@ -153,7 +154,7 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
 }
 
 static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
-    snprintf(buf, size, "%s/%d", CGROUP_NAME, pid);
+    snprintf(buf, size, "%s/%ld", CGROUP_NAME, (long)pid);
 }
 
 ratelimit_code ratelimit_init(void) {
@@ -309,7 +310,7 @@ ratelimit_code ratelimit_cleanup_all(void) {
             char *endptr;
             errno = 0;
             long pid_long = strtol(info.path, &endptr, 10);
-            if (errno != 0 || *endptr != '\0' || pid_long <= 0) {
+            if (errno != 0 || *endptr != '\0' || pid_long <= 0 || pid_long > INT_MAX) {
                 ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
                 continue;
             }

@@ -1,6 +1,7 @@
 #include "discovery.h"
 #include "ratelimit.h"
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +68,7 @@ static pid_t parse_pid(const char *arg) {
     char *endptr;
     errno = 0;
     long pid_long = strtol(arg, &endptr, 10);
-    if (errno != 0 || *endptr != '\0' || pid_long <= 0) {
+    if (errno != 0 || *endptr != '\0' || pid_long <= 0 || pid_long > INT_MAX) {
         fprintf(stderr, "%s: invalid PID: %s\n", PROGRAM_NAME, arg);
         exit(EXIT_FAILURE);
     }
