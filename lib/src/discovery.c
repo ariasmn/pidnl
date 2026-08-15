@@ -93,6 +93,13 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
             if (len > 0 && proc->process_name[len - 1] == '\n') {
                 proc->process_name[len - 1] = '\0';
             }
+            // The process itself controls its comm (prctl/argv[0]), so strip
+            // control characters to prevent terminal escape injection.
+            for (char *p = proc->process_name; *p; p++) {
+                if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f) {
+                    *p = '?';
+                }
+            }
         }
         fclose(f);
     }
