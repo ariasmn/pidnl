@@ -133,10 +133,16 @@ static void monitor_run(void) {
 
     struct sockaddr_un addr;
     struct stat st;
-    if (stat(MONITOR_SOCKET_DIR, &st) < 0) {
-        if (mkdir(MONITOR_SOCKET_DIR, 0700) < 0 && errno != EEXIST) {
+    // The directory may already exist; only trust it if it is a real
+    // root-owned directory and not a symlink.
+    if (lstat(MONITOR_SOCKET_DIR, &st) < 0) {
+        if (errno != ENOENT || mkdir(MONITOR_SOCKET_DIR, 0700) < 0 ||
+            lstat(MONITOR_SOCKET_DIR, &st) < 0) {
             exit(1);
         }
+    }
+    if (!S_ISDIR(st.st_mode) || st.st_uid != 0) {
+        exit(1);
     }
     unlink(MONITOR_SOCKET_PATH);
 
