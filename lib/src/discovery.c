@@ -108,6 +108,12 @@ static int add_process_list(process_list *list, pid_t pid, int is_tcp) {
     ssize_t len = readlink(path, proc->exe_path, sizeof(proc->exe_path) - 1);
     if (len != -1) {
         proc->exe_path[len] = '\0';
+        // Same here
+        for (char *p = proc->exe_path; *p; p++) {
+            if ((unsigned char)*p < 0x20 || (unsigned char)*p == 0x7f) {
+                *p = '?';
+            }
+        }
     }
 
     list->count++;
