@@ -39,8 +39,8 @@ pidnl is a Linux-only tool and has a few runtime requirements:
   `pidnl` cgroup and moves the target process into it.
 - **eBPF support** is required, specifically the `cgroup/skb` hooks used to
   filter ingress and egress traffic.
-- A reasonably recent kernel. The eBPF program uses `bpf_spin_lock`, so
-  **Linux 5.1 or newer** is required.
+- A reasonably recent kernel. The eBPF program uses `bpf_spin_lock` and BPF
+  links are pinned to bpffs, so **Linux 5.8 or newer** is required.
 - **Root privileges** are required to attach the eBPF programs and manage
   cgroups. The CLI must be run as root; the GUI will prompt for privileges
   through PolicyKit.
