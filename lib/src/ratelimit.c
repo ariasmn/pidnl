@@ -64,8 +64,8 @@ static int get_bpffs_mount(char *buf, size_t size) {
     struct mntent *entry;
     while ((entry = getmntent(mounts)) != NULL) {
         struct statfs fs;
-        if (strcmp(entry->mnt_type, BPFFS_TYPE) != 0 ||
-            statfs(entry->mnt_dir, &fs) != 0 || fs.f_type != BPF_FS_MAGIC) {
+        if (strcmp(entry->mnt_type, BPFFS_TYPE) != 0 || statfs(entry->mnt_dir, &fs) != 0 ||
+            fs.f_type != BPF_FS_MAGIC) {
             continue;
         }
         snprintf(buf, size, "%s", entry->mnt_dir);
@@ -159,7 +159,8 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd, pid_t pid) {
     }
 }
 
-static ratelimit_code attach_bpf_programs(rate_limiter *limiter, const char *pin_dir, rate_limit_config config) {
+static ratelimit_code
+attach_bpf_programs(rate_limiter *limiter, const char *pin_dir, rate_limit_config config) {
     struct ratelimit_bpf *skel;
     int map_fd;
 
