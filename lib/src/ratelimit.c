@@ -379,7 +379,7 @@ ratelimit_code ratelimit_cleanup_all(void) {
     cgroup_walk_tree_end(&handle);
 
     // We removed the children, now we delete the parent cgroup.
-    // No need to get the fd since no BPF attached to parent.
+    // No need to get the fd since no BPF link is pinned to the parent.
     if (cgroup_delete_cgroup(cg, 1) != 0) {
         cgroup_free(&cg);
         return RATELIMIT_LIBCG_DELETE;
@@ -395,7 +395,7 @@ static int read_limit_from_cgroup_progs(
 ) {
     *limit_kbps = 0;
 
-    // We only attach one program per attach type (detach + no ALLOW_MULTI).
+    // We only create one link per attach type.
     __u32 prog_id = 0;
     LIBBPF_OPTS(bpf_prog_query_opts, opts);
     opts.prog_cnt = 1;

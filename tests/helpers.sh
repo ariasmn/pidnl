@@ -140,8 +140,8 @@ assert_cgroup_not_exists() {
     return 0
 }
 
-# Check that BPF links are attached via bpftool
-assert_bpf_attached() {
+# Check that BPF links exist via bpftool
+assert_bpf_linked() {
     local output
     output=$(bpftool link show 2>/dev/null || true)
     if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
@@ -151,8 +151,8 @@ assert_bpf_attached() {
     return 1
 }
 
-# Check that BPF links are NOT attached (after unset/clean)
-assert_bpf_not_attached() {
+# Check that BPF links do NOT exist (after unset/clean)
+assert_bpf_not_linked() {
     local output
     output=$(bpftool link show 2>/dev/null || true)
     if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
