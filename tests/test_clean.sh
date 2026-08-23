@@ -27,7 +27,7 @@ if assert_cgroup_exists "$_NC_PID"; then
 fi
 
 test_start "BPF links created after limit set"
-if assert_bpf_linked; then
+if assert_bpf_linked "$_NC_PID"; then
     test_pass
 fi
 
@@ -38,7 +38,7 @@ if assert_cgroup_not_exists "$_NC_PID"; then
 fi
 
 test_start "'clean -y' removes BPF links"
-if assert_bpf_not_linked; then
+if assert_bpf_not_linked "$_NC_PID"; then
     test_pass
 fi
 
