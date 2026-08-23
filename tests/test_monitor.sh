@@ -32,7 +32,7 @@ NC_PID=""
 sleep 1
 
 test_start "monitor auto-cleans when watched process dies"
-if assert_cgroup_not_exists "$SAVED_PID" && assert_bpf_not_attached; then
+if assert_cgroup_not_exists "$SAVED_PID" && assert_bpf_not_linked "$SAVED_PID"; then
     test_pass
 fi
 

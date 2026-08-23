@@ -157,6 +157,7 @@ test:
 				libcgroup-dev \
 				netcat-openbsd \
 				make >/dev/null 2>&1; \
+			mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true; \
 			make dev; \
 			bash tests/run.sh \
 		'

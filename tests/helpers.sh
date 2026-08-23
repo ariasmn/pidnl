@@ -140,23 +140,21 @@ assert_cgroup_not_exists() {
     return 0
 }
 
-# Check that BPF programs are attached via bpftool
-assert_bpf_attached() {
-    local output
-    output=$(bpftool prog show 2>/dev/null || true)
-    if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
+# Check that BPF links are pinned for a PID
+assert_bpf_linked() {
+    local pid="$1"
+    if [ -e "/sys/fs/bpf/pidnl/${pid}/egress" ] || [ -e "/sys/fs/bpf/pidnl/${pid}/ingress" ]; then
         return 0
     fi
-    test_fail "no BPF programs (egress_rl/ingress_rl) found"
+    test_fail "no BPF links pinned under /sys/fs/bpf/pidnl/${pid}"
     return 1
 }
 
-# Check that BPF programs are NOT attached (after unset/clean)
-assert_bpf_not_attached() {
-    local output
-    output=$(bpftool prog show 2>/dev/null || true)
-    if echo "$output" | grep -q "egress_rl\|ingress_rl"; then
-        test_fail "BPF programs still present after cleanup"
+# Check that BPF links are NOT pinned for a PID (after unset/clean)
+assert_bpf_not_linked() {
+    local pid="$1"
+    if [ -e "/sys/fs/bpf/pidnl/${pid}/egress" ] || [ -e "/sys/fs/bpf/pidnl/${pid}/ingress" ]; then
+        test_fail "BPF links still pinned after cleanup"
         return 1
     fi
     return 0

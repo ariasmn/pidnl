@@ -25,8 +25,8 @@ if assert_cgroup_exists "$_NC_PID"; then
     test_pass
 fi
 
-test_start "'limit set' attaches BPF programs"
-if assert_bpf_attached; then
+test_start "'limit set' creates BPF links"
+if assert_bpf_linked "$_NC_PID"; then
     test_pass
 fi
 
@@ -84,8 +84,8 @@ if assert_cgroup_not_exists "$_NC_PID"; then
     test_pass
 fi
 
-test_start "'limit unset' detaches BPF programs"
-if assert_bpf_not_attached; then
+test_start "'limit unset' removes BPF links"
+if assert_bpf_not_linked "$_NC_PID"; then
     test_pass
 fi
 

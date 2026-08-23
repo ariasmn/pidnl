@@ -10,6 +10,8 @@
 #include <limits.h>
 #include <linux/limits.h>
 #include <linux/magic.h>
+#include <mntent.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,8 +26,11 @@ const uint32_t RATELIMIT_UNLIMITED = UINT32_MAX;
 const unsigned int DIRECTION_UPLOAD = 0;
 const unsigned int DIRECTION_DOWNLOAD = 1;
 
+static const char *BPFFS_TYPE = "bpf";
 static const char *EGRESS_PROG_NAME = "egress_rl";
 static const char *INGRESS_PROG_NAME = "ingress_rl";
+static const char *EGRESS_PIN_NAME = "egress";
+static const char *INGRESS_PIN_NAME = "ingress";
 static const char *RATE_LIMITS_MAP_NAME = "rate_limits";
 
 struct rate_limiter {
@@ -47,6 +52,29 @@ static int get_cgroup2_mount(char *buf, size_t size) {
     }
     free(mount_point);
     return is_cgroup2 ? 0 : -1;
+}
+
+static int get_bpffs_mount(char *buf, size_t size) {
+    FILE *mounts = fopen("/proc/mounts", "r");
+    if (!mounts) {
+        return -1;
+    }
+
+    int found = 0;
+    struct mntent *entry;
+    while ((entry = getmntent(mounts)) != NULL) {
+        struct statfs fs;
+        if (strcmp(entry->mnt_type, BPFFS_TYPE) != 0 || statfs(entry->mnt_dir, &fs) != 0 ||
+            fs.f_type != BPF_FS_MAGIC) {
+            continue;
+        }
+        snprintf(buf, size, "%s", entry->mnt_dir);
+        found = 1;
+        break;
+    }
+
+    fclose(mounts);
+    return found ? 0 : -1;
 }
 
 static int open_cgroup_fd(const char *name) {
@@ -79,10 +107,49 @@ static ratelimit_code create_cgroup(const char *name, struct cgroup **out) {
     return RATELIMIT_OK;
 }
 
-static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
+static ratelimit_code create_pin_dir(pid_t pid, char *pin_dir, size_t size) {
+    char root[PATH_MAX];
+    char base[PATH_MAX];
+    if (get_bpffs_mount(root, sizeof(root)) != 0) {
+        return RATELIMIT_NO_BPFFS;
+    }
+
+    snprintf(base, sizeof(base), "%s/%s", root, CGROUP_NAME);
+    snprintf(pin_dir, size, "%s/%ld", base, (long)pid);
+    if ((mkdir(base, 0700) != 0 && errno != EEXIST) ||
+        (mkdir(pin_dir, 0700) != 0 && errno != EEXIST)) {
+        return RATELIMIT_BPF_PIN;
+    }
+    return RATELIMIT_OK;
+}
+
+static void detach_pinned_links(pid_t pid) {
+    char root[PATH_MAX];
+    if (get_bpffs_mount(root, sizeof(root)) != 0) {
+        return;
+    }
+
+    const char *links[] = {EGRESS_PIN_NAME, INGRESS_PIN_NAME};
+    for (size_t i = 0; i < sizeof(links) / sizeof(links[0]); i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s/%ld/%s", root, CGROUP_NAME, (long)pid, links[i]);
+
+        int fd = bpf_obj_get(path);
+        if (fd >= 0) {
+            bpf_link_detach(fd);
+            close(fd);
+        }
+        unlink(path);
+    }
+
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s/%s/%ld", root, CGROUP_NAME, (long)pid);
+    rmdir(dir);
+}
+
+static void delete_cgroup(struct cgroup *cg, int cgroup_fd, pid_t pid) {
     if (cgroup_fd >= 0) {
-        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
-        bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
+        detach_pinned_links(pid);
         close(cgroup_fd);
     }
 
@@ -92,11 +159,10 @@ static void delete_cgroup(struct cgroup *cg, int cgroup_fd) {
     }
 }
 
-static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_config config) {
+static ratelimit_code
+attach_bpf_programs(rate_limiter *limiter, const char *pin_dir, rate_limit_config config) {
     struct ratelimit_bpf *skel;
-    int map_fd, err;
-    ratelimit_code ret;
-    int upload_attached = 0;
+    int map_fd;
 
     skel = ratelimit_bpf__open();
     if (!skel) {
@@ -108,44 +174,40 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
         return RATELIMIT_BPF_LOAD;
     }
 
+    const struct {
+        const char *pin_name;
+        unsigned int direction;
+        uint32_t limit_kbps;
+        struct bpf_program *prog;
+    } directions[] = {
+        {EGRESS_PIN_NAME, DIRECTION_UPLOAD, config.upload_kbps, skel->progs.egress_rl},
+        {INGRESS_PIN_NAME, DIRECTION_DOWNLOAD, config.download_kbps, skel->progs.ingress_rl},
+    };
+
     map_fd = bpf_map__fd(skel->maps.rate_limits);
+    for (size_t i = 0; i < sizeof(directions) / sizeof(directions[0]); i++) {
+        if (directions[i].limit_kbps == RATELIMIT_UNLIMITED) {
+            continue;
+        }
 
-    if (config.upload_kbps != RATELIMIT_UNLIMITED) {
-        err = bpf_map_update_elem(map_fd, &DIRECTION_UPLOAD, &config.upload_kbps, 0);
-        if (err) {
+        if (bpf_map_update_elem(map_fd, &directions[i].direction, &directions[i].limit_kbps, 0)) {
             ratelimit_bpf__destroy(skel);
             return RATELIMIT_BPF_LOAD;
         }
 
-        ret = bpf_prog_attach(
-            bpf_program__fd(skel->progs.egress_rl), limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS, 0
-        );
-        if (ret) {
+        struct bpf_link *link = bpf_program__attach_cgroup(directions[i].prog, limiter->cgroup_fd);
+        if (!link) {
             ratelimit_bpf__destroy(skel);
-            return RATELIMIT_BPF_ATTACH;
-        }
-        upload_attached = 1;
-    }
-
-    if (config.download_kbps != RATELIMIT_UNLIMITED) {
-        err = bpf_map_update_elem(map_fd, &DIRECTION_DOWNLOAD, &config.download_kbps, 0);
-        if (err) {
-            if (upload_attached) {
-                bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
-            }
-            ratelimit_bpf__destroy(skel);
-            return RATELIMIT_BPF_LOAD;
+            return RATELIMIT_BPF_LINK;
         }
 
-        ret = bpf_prog_attach(
-            bpf_program__fd(skel->progs.ingress_rl), limiter->cgroup_fd, BPF_CGROUP_INET_INGRESS, 0
-        );
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/%s", pin_dir, directions[i].pin_name);
+        int ret = bpf_link__pin(link, path);
+        bpf_link__destroy(link);
         if (ret) {
-            if (upload_attached) {
-                bpf_prog_detach(limiter->cgroup_fd, BPF_CGROUP_INET_EGRESS);
-            }
             ratelimit_bpf__destroy(skel);
-            return RATELIMIT_BPF_ATTACH;
+            return RATELIMIT_BPF_PIN;
         }
     }
 
@@ -155,6 +217,29 @@ static ratelimit_code attach_bpf_programs(rate_limiter *limiter, rate_limit_conf
 
 static void build_cgroup_name(pid_t pid, char *buf, size_t size) {
     snprintf(buf, size, "%s/%ld", CGROUP_NAME, (long)pid);
+}
+
+static ratelimit_code delete_pid_cgroup(pid_t pid) {
+    char name[64];
+    build_cgroup_name(pid, name, sizeof(name));
+
+    struct cgroup *cg = cgroup_new_cgroup(name);
+    if (!cg) {
+        return RATELIMIT_LIBCG_DELETE;
+    }
+    if (cgroup_get_cgroup(cg) != 0) {
+        cgroup_free(&cg);
+        return RATELIMIT_CGROUP_NOT_FOUND;
+    }
+
+    int cgroup_fd = open_cgroup_fd(name);
+    if (cgroup_fd < 0) {
+        cgroup_free(&cg);
+        return RATELIMIT_CGROUP_NOT_FOUND;
+    }
+
+    delete_cgroup(cg, cgroup_fd, pid);
+    return RATELIMIT_OK;
 }
 
 ratelimit_code ratelimit_init(void) {
@@ -175,6 +260,7 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     ratelimit_code err;
     int cgroup_fd;
     char name[64];
+    char pin_dir[PATH_MAX];
 
     if (pid <= 0) {
         return RATELIMIT_INVALID_PID;
@@ -193,23 +279,21 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     }
 
     if (cgroup_attach_task_pid(child, pid) != 0) {
-        cgroup_delete_cgroup(child, 1);
-        cgroup_free(&child);
+        delete_cgroup(child, -1, pid);
         cgroup_free(&parent);
         return RATELIMIT_LIBCG_ATTACH;
     }
 
     cgroup_fd = open_cgroup_fd(name);
     if (cgroup_fd < 0) {
-        cgroup_delete_cgroup(child, 1);
-        cgroup_free(&child);
+        delete_cgroup(child, -1, pid);
         cgroup_free(&parent);
         return RATELIMIT_OPEN_CGROUP;
     }
 
     limiter = calloc(1, sizeof(rate_limiter));
     if (!limiter) {
-        delete_cgroup(child, cgroup_fd);
+        delete_cgroup(child, cgroup_fd, pid);
         cgroup_free(&parent);
         return RATELIMIT_ALLOC;
     }
@@ -217,16 +301,16 @@ ratelimit_code limit_process_bandwidth(pid_t pid, rate_limit_config config) {
     limiter->cg = child;
     limiter->cgroup_fd = cgroup_fd;
 
-    // Detach any existing BPF programs before attaching new ones
+    // Detach any stale pinned links before attaching new ones
     // This handles the case where limits are changed (e.g., from limited to unlimited)
-    // TODO: Seems to works fine even if there's no BPF attached, I need to double check
-    // if this is costly in terms of perfomance, although it doesn't seem like so.
-    bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_EGRESS);
-    bpf_prog_detach(cgroup_fd, BPF_CGROUP_INET_INGRESS);
+    detach_pinned_links(pid);
 
-    err = attach_bpf_programs(limiter, config);
+    err = create_pin_dir(pid, pin_dir, sizeof(pin_dir));
+    if (err == RATELIMIT_OK) {
+        err = attach_bpf_programs(limiter, pin_dir, config);
+    }
     if (err != RATELIMIT_OK) {
-        delete_cgroup(limiter->cg, limiter->cgroup_fd);
+        delete_cgroup(limiter->cg, limiter->cgroup_fd, pid);
         cgroup_free(&parent);
         free(limiter);
         return err;
@@ -258,33 +342,9 @@ void close_rate_limiter_handle(rate_limiter *limiter) {
 }
 
 ratelimit_code unregister_rate_limiter_by_pid(pid_t pid) {
-    struct cgroup *cg = NULL;
-    int cgroup_fd;
-    char name[64];
-
     // TODO: Log warning if monitor unregistration fails
     monitor_unwatch_pid(pid);
-
-    build_cgroup_name(pid, name, sizeof(name));
-
-    cg = cgroup_new_cgroup(name);
-    if (!cg) {
-        return RATELIMIT_LIBCG_DELETE;
-    }
-
-    if (cgroup_get_cgroup(cg) != 0) {
-        cgroup_free(&cg);
-        return RATELIMIT_CGROUP_NOT_FOUND;
-    }
-
-    cgroup_fd = open_cgroup_fd(name);
-    if (cgroup_fd < 0) {
-        cgroup_free(&cg);
-        return RATELIMIT_CGROUP_NOT_FOUND;
-    }
-
-    delete_cgroup(cg, cgroup_fd);
-    return RATELIMIT_OK;
+    return delete_pid_cgroup(pid);
 }
 
 ratelimit_code ratelimit_cleanup_all(void) {
@@ -306,7 +366,6 @@ ratelimit_code ratelimit_cleanup_all(void) {
         cgroup_walk_tree_begin(CGROUP_WALK_CONTROLLER, CGROUP_NAME, 0, &handle, &info, &base_level);
     while (ret == 0) {
         if (info.type == CGROUP_FILE_TYPE_DIR && strcmp(info.path, "") != 0) {
-            char name[64];
             char *endptr;
             errno = 0;
             long pid_long = strtol(info.path, &endptr, 10);
@@ -314,23 +373,14 @@ ratelimit_code ratelimit_cleanup_all(void) {
                 ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
                 continue;
             }
-            build_cgroup_name((pid_t)pid_long, name, sizeof(name));
-
-            struct cgroup *child_cg = cgroup_new_cgroup(name);
-            if (child_cg && cgroup_get_cgroup(child_cg) != 0) {
-                cgroup_free(&child_cg);
-            }
-            if (child_cg) {
-                int cgroup_fd = open_cgroup_fd(name);
-                delete_cgroup(child_cg, cgroup_fd);
-            }
+            delete_pid_cgroup((pid_t)pid_long);
         }
         ret = cgroup_walk_tree_next(0, &handle, &info, base_level);
     }
     cgroup_walk_tree_end(&handle);
 
     // We removed the children, now we delete the parent cgroup.
-    // No need to get the fd since no BPF attached to parent.
+    // No need to get the fd since no BPF link is pinned to the parent.
     if (cgroup_delete_cgroup(cg, 1) != 0) {
         cgroup_free(&cg);
         return RATELIMIT_LIBCG_DELETE;
@@ -346,7 +396,7 @@ static int read_limit_from_cgroup_progs(
 ) {
     *limit_kbps = 0;
 
-    // We only attach one program per attach type (detach + no ALLOW_MULTI).
+    // We only create one link per attach type.
     __u32 prog_id = 0;
     LIBBPF_OPTS(bpf_prog_query_opts, opts);
     opts.prog_cnt = 1;
@@ -446,8 +496,10 @@ const char *ratelimit_code_string(ratelimit_code code) {
         return "Failed to open BPF object";
     case RATELIMIT_BPF_LOAD:
         return "Failed to load BPF program";
-    case RATELIMIT_BPF_ATTACH:
-        return "Failed to attach BPF program";
+    case RATELIMIT_BPF_LINK:
+        return "Failed to create BPF link";
+    case RATELIMIT_BPF_PIN:
+        return "Failed to pin BPF link";
     case RATELIMIT_CGROUP_NOT_FOUND:
         return "No rate limit set for PID";
     case RATELIMIT_LIBCG_INIT:
@@ -460,6 +512,8 @@ const char *ratelimit_code_string(ratelimit_code code) {
         return "Failed to delete cgroup";
     case RATELIMIT_NO_CGROUP2:
         return "cgroup v2 is required but not available";
+    case RATELIMIT_NO_BPFFS:
+        return "bpffs is required but not available";
     default:
         return "Unknown error";
     }
