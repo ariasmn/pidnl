@@ -291,20 +291,16 @@ void destroy_process_list(process_list *list) {
 }
 
 const char *discovery_code_string(discovery_code code) {
-    switch (code) {
-    case DISCOVERY_OK:
-        return "Success";
-    case DISCOVERY_ALLOC:
-        return "Failed to allocate memory";
-    case DISCOVERY_SOCKET:
-        return "Failed to create netlink socket";
-    case DISCOVERY_BIND:
-        return "Failed to bind netlink socket";
-    case DISCOVERY_RECVMSG:
-        return "Failed to receive netlink messages";
-    case DISCOVERY_NETLINK_MSG:
-        return "Netlink error received";
-    default:
+    static const char *const strings[] = {
+        [DISCOVERY_OK] = "Success",
+        [DISCOVERY_ALLOC] = "Failed to allocate memory",
+        [DISCOVERY_SOCKET] = "Failed to create netlink socket",
+        [DISCOVERY_BIND] = "Failed to bind netlink socket",
+        [DISCOVERY_RECVMSG] = "Failed to receive netlink messages",
+        [DISCOVERY_NETLINK_MSG] = "Netlink error received",
+    };
+    if ((unsigned)code >= sizeof(strings) / sizeof(strings[0])) {
         return "Unknown error";
     }
+    return strings[code];
 }

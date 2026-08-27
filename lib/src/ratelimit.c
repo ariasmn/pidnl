@@ -483,38 +483,25 @@ int get_rate_limits_from_cgroup(pid_t pid, uint32_t *upload_kbps, uint32_t *down
 }
 
 const char *ratelimit_code_string(ratelimit_code code) {
-    switch (code) {
-    case RATELIMIT_OK:
-        return "Success";
-    case RATELIMIT_INVALID_PID:
-        return "Invalid PID";
-    case RATELIMIT_ALLOC:
-        return "Memory allocation failed";
-    case RATELIMIT_OPEN_CGROUP:
-        return "Failed to open cgroup";
-    case RATELIMIT_BPF_OPEN:
-        return "Failed to open BPF object";
-    case RATELIMIT_BPF_LOAD:
-        return "Failed to load BPF program";
-    case RATELIMIT_BPF_LINK:
-        return "Failed to create BPF link";
-    case RATELIMIT_BPF_PIN:
-        return "Failed to pin BPF link";
-    case RATELIMIT_CGROUP_NOT_FOUND:
-        return "No rate limit set for PID";
-    case RATELIMIT_LIBCG_INIT:
-        return "Failed to initialize libcgroup";
-    case RATELIMIT_LIBCG_CREATE:
-        return "Failed to create cgroup";
-    case RATELIMIT_LIBCG_ATTACH:
-        return "Failed to attach process to cgroup";
-    case RATELIMIT_LIBCG_DELETE:
-        return "Failed to delete cgroup";
-    case RATELIMIT_NO_CGROUP2:
-        return "cgroup v2 is required but not available";
-    case RATELIMIT_NO_BPFFS:
-        return "bpffs is required but not available";
-    default:
+    static const char *const strings[] = {
+        [RATELIMIT_OK] = "Success",
+        [RATELIMIT_INVALID_PID] = "Invalid PID",
+        [RATELIMIT_ALLOC] = "Memory allocation failed",
+        [RATELIMIT_OPEN_CGROUP] = "Failed to open cgroup",
+        [RATELIMIT_BPF_OPEN] = "Failed to open BPF object",
+        [RATELIMIT_BPF_LOAD] = "Failed to load BPF program",
+        [RATELIMIT_BPF_LINK] = "Failed to create BPF link",
+        [RATELIMIT_BPF_PIN] = "Failed to pin BPF link",
+        [RATELIMIT_CGROUP_NOT_FOUND] = "No rate limit set for PID",
+        [RATELIMIT_LIBCG_INIT] = "Failed to initialize libcgroup",
+        [RATELIMIT_LIBCG_CREATE] = "Failed to create cgroup",
+        [RATELIMIT_LIBCG_ATTACH] = "Failed to attach process to cgroup",
+        [RATELIMIT_LIBCG_DELETE] = "Failed to delete cgroup",
+        [RATELIMIT_NO_CGROUP2] = "cgroup v2 is required but not available",
+        [RATELIMIT_NO_BPFFS] = "bpffs is required but not available",
+    };
+    if ((unsigned)code >= sizeof(strings) / sizeof(strings[0])) {
         return "Unknown error";
     }
+    return strings[code];
 }
