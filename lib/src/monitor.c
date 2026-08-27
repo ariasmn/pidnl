@@ -401,34 +401,23 @@ monitor_code monitor_stop(void) {
 }
 
 const char *monitor_code_string(monitor_code code) {
-    switch (code) {
-    case MONITOR_OK:
-        return "Success";
-    case MONITOR_SOCKET:
-        return "Failed to create socket";
-    case MONITOR_CONNECT:
-        return "Failed to connect to monitor daemon";
-    case MONITOR_BIND:
-        return "Failed to bind socket";
-    case MONITOR_LISTEN:
-        return "Failed to listen on socket";
-    case MONITOR_PIPE:
-        return "Failed to create pipe";
-    case MONITOR_FORK:
-        return "Failed to fork daemon process";
-    case MONITOR_WRITE:
-        return "Failed to write to socket";
-    case MONITOR_READ:
-        return "Failed to read from socket";
-    case MONITOR_PIDFD:
-        return "Failed to create pidfd";
-    case MONITOR_SLOTS:
-        return "No available slots for watching PIDs";
-    case MONITOR_NOT_FOUND:
-        return "PID not found in watch list";
-    case MONITOR_TIMEOUT:
-        return "Timeout waiting for daemon startup";
-    default:
+    static const char *const strings[] = {
+        [MONITOR_OK] = "Success",
+        [MONITOR_SOCKET] = "Failed to create socket",
+        [MONITOR_CONNECT] = "Failed to connect to monitor daemon",
+        [MONITOR_BIND] = "Failed to bind socket",
+        [MONITOR_LISTEN] = "Failed to listen on socket",
+        [MONITOR_PIPE] = "Failed to create pipe",
+        [MONITOR_FORK] = "Failed to fork daemon process",
+        [MONITOR_WRITE] = "Failed to write to socket",
+        [MONITOR_READ] = "Failed to read from socket",
+        [MONITOR_PIDFD] = "Failed to create pidfd",
+        [MONITOR_SLOTS] = "No available slots for watching PIDs",
+        [MONITOR_NOT_FOUND] = "PID not found in watch list",
+        [MONITOR_TIMEOUT] = "Timeout waiting for daemon startup",
+    };
+    if ((unsigned)code >= sizeof(strings) / sizeof(strings[0])) {
         return "Unknown error";
     }
+    return strings[code];
 }
